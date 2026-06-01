@@ -65,24 +65,29 @@ async function handleVRMAnimationEvent(viewer: Viewer, amicaLife: AmicaLife) {
   // removed for staging logs.
   //console.log("Handling idle event (animation):", previousAnimation);
 
-  try {
-    if (viewer) {
-      const animation = await loadVRMAnimation(randomAnimation);
-      if (!animation) {
-        throw new Error("Loading animation failed");
-      }
-      // @ts-ignore
-      const duration = await viewer.model!.playAnimation(animation, previousAnimation);
-      requestAnimationFrame(() => { viewer.resetCameraLerp(); });
+  if (!viewer?.model) {
+    console.warn("Skipping idle animation playback because the model is not ready.");
+    amicaLife.eventProcessing = false;
+    return;
+  }
 
-      // Set timeout for the duration of the animation
-      setTimeout(() => {
-        amicaLife.eventProcessing = false;
-        console.timeEnd("processing_event VRMA");
-      }, duration * 1000);
+  try {
+    const animation = await loadVRMAnimation(randomAnimation);
+    if (!animation) {
+      throw new Error("Loading animation failed");
     }
+    // @ts-ignore
+    const duration = await viewer.model.playAnimation(animation, previousAnimation);
+    requestAnimationFrame(() => { viewer.resetCameraLerp(); });
+
+    // Set timeout for the duration of the animation
+    setTimeout(() => {
+      amicaLife.eventProcessing = false;
+      console.timeEnd("processing_event VRMA");
+    }, duration * 1000);
   } catch (error) {
     console.error("Error loading animation:", error);
+    amicaLife.eventProcessing = false;
   }
 }
 
