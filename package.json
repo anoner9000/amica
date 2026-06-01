@@ -17,7 +17,7 @@
     "tauri": "tauri",
     "generate:paths": "node scripts/generate_paths.js",
     "splash": "cp ./public/splashscreen.html out/",
-    "dev:deiphobe": "bash scripts/start_deiphobe_shell.sh",
+    "dev:deiphobe": "npm run piper:start-detached && npm run dev",
     "piper:health": "bash scripts/piper_control.sh health",
     "piper:start": "bash scripts/piper_control.sh start",
     "piper:start-detached": "bash scripts/piper_control.sh start-detached",
