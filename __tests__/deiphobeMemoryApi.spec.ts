@@ -8,7 +8,7 @@ const mockConfigValues: Record<string, string> = {
   deiphobe_session_id: "voice-avatar-test",
   deiphobe_namespace: "voice",
   deiphobe_private_mode: "true",
-  deiphobe_private_memory_root: "/tmp/private-memory",
+  deiphobe_private_memory_root: "/home/kyler/.clawdawg-private/deiphobe_memory",
 };
 
 const mockSpawn = jest.fn();
@@ -139,7 +139,7 @@ describe("deiphobeMemory handler", () => {
     expect(res.body).toEqual({
       privateMode: true,
       privateMemoryRootConfigured: true,
-      privateMemoryRoot: "/tmp/private-memory",
+      privateMemoryRoot: "/home/kyler/.clawdawg-private/deiphobe_memory",
     });
   });
 
@@ -164,7 +164,7 @@ describe("deiphobeMemory handler", () => {
           DEIPHOBE_CHAT_SESSION_ID: "voice-avatar-test",
           DEIPHOBE_CHAT_NAMESPACE: "voice",
           DEIPHOBE_PRIVATE_MODE: "1",
-          DEIPHOBE_PRIVATE_MEMORY_ROOT: "/tmp/private-memory",
+          DEIPHOBE_PRIVATE_MEMORY_ROOT: "/home/kyler/.clawdawg-private/deiphobe_memory",
         }),
       }),
     );

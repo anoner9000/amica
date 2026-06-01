@@ -65,12 +65,12 @@ describe("DeiphobeSettingsPage private memory panel", () => {
           json: async () => ({
             privateMode: true,
             privateMemoryRootConfigured: true,
-            privateMemoryRoot: "/tmp/private-memory",
+            privateMemoryRoot: "/home/kyler/.clawdawg-private/deiphobe_memory",
           }),
           text: async () => JSON.stringify({
             privateMode: true,
             privateMemoryRootConfigured: true,
-            privateMemoryRoot: "/tmp/private-memory",
+            privateMemoryRoot: "/home/kyler/.clawdawg-private/deiphobe_memory",
           }),
         } as Response);
       }
@@ -120,7 +120,7 @@ describe("DeiphobeSettingsPage private memory panel", () => {
           setDeiphobeTimeoutSeconds={jest.fn()}
           deiphobePrivateMode="true"
           setDeiphobePrivateMode={jest.fn()}
-          deiphobePrivateMemoryRoot="/tmp/private-memory"
+          deiphobePrivateMemoryRoot="/home/kyler/.clawdawg-private/deiphobe_memory"
           setDeiphobePrivateMemoryRoot={jest.fn()}
           setSettingsUpdated={jest.fn()}
         />,
@@ -137,7 +137,7 @@ describe("DeiphobeSettingsPage private memory panel", () => {
     expect(container.textContent).toContain("Reject");
     expect(container.textContent).toContain("Approve & Promote");
     expect(container.textContent).toContain("ON");
-    expect(container.textContent).toContain("/tmp/private-memory");
+    expect(container.textContent).toContain("/home/kyler/.clawdawg-private/deiphobe_memory");
     expect(container.querySelector('input[placeholder="Reject reason"]')).not.toBeNull();
   });
 });
