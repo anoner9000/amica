@@ -13,9 +13,11 @@ The first time you run it for a given voice, Piper downloads the matching
 
 from __future__ import annotations
 
+import errno
 import io
 import json
 import os
+import sys
 import wave
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -157,7 +159,16 @@ def main() -> None:
         f"http://{HOST}:{PORT} using model={PIPER_MODEL!r} "
         f"data_dir={str(PIPER_DATA_DIR)!r}"
     )
-    server = ThreadingHTTPServer((HOST, PORT), PiperHandler)
+    try:
+        server = ThreadingHTTPServer((HOST, PORT), PiperHandler)
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            print(
+                "Port 5000 is already in use. If Piper is healthy, keep using it; "
+                "otherwise stop the stale local_piper_server.py process.",
+                file=sys.stderr,
+            )
+        raise
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -17,7 +17,12 @@
     "tauri": "tauri",
     "generate:paths": "node scripts/generate_paths.js",
     "splash": "cp ./public/splashscreen.html out/",
-    "dev:deiphobe": "bash scripts/start_deiphobe_shell.sh"
+    "dev:deiphobe": "bash scripts/start_deiphobe_shell.sh",
+    "piper:health": "bash scripts/piper_control.sh health",
+    "piper:start": "bash scripts/piper_control.sh start",
+    "piper:start-detached": "bash scripts/piper_control.sh start-detached",
+    "piper:stop": "bash scripts/piper_control.sh stop",
+    "piper:smoke": "bash scripts/piper_control.sh smoke"
   },
   "dependencies": {
     "@charcoal-ui/icons": "^3.15.0",
