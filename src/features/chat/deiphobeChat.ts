@@ -1,4 +1,5 @@
 import { Message } from "./messages";
+import { stripLeadingAmicaExpressionTag } from "./deiphobePrompt";
 
 function getLastUserMessage(messages: Message[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -10,10 +11,24 @@ function getLastUserMessage(messages: Message[]): string {
   return messages[messages.length - 1]?.content ?? "";
 }
 
+function stripLastUserMessageAmicaExpressionTag(messages: Message[]): Message[] {
+  const nextMessages = [...messages];
+  for (let i = nextMessages.length - 1; i >= 0; i -= 1) {
+    if (nextMessages[i]?.role === "user") {
+      nextMessages[i] = {
+        ...nextMessages[i],
+        content: stripLeadingAmicaExpressionTag(nextMessages[i].content),
+      };
+      break;
+    }
+  }
+  return nextMessages;
+}
+
 export async function getDeiphobeChatResponseStream(
   messages: Message[],
 ): Promise<ReadableStream> {
-  const text = getLastUserMessage(messages).trim();
+  const text = stripLeadingAmicaExpressionTag(getLastUserMessage(messages)).trim();
   if (!text) {
     throw new Error("Deiphobe backend requires a user message");
   }
@@ -30,7 +45,7 @@ export async function getDeiphobeChatResponseStream(
     },
     body: JSON.stringify({
       text,
-      messages,
+      messages: stripLastUserMessageAmicaExpressionTag(messages),
     }),
   });
 

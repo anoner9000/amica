@@ -4,6 +4,7 @@ import { spawn } from "child_process";
 import { handleConfig } from "@/features/externalAPI/externalAPI";
 import { config } from "@/utils/config";
 import { Message } from "@/features/chat/messages";
+import { stripLeadingAmicaExpressionTag } from "@/features/chat/deiphobePrompt";
 
 function isTruthy(value: string): boolean {
   const normalized = value.trim().toLowerCase();
@@ -38,7 +39,7 @@ export default async function handler(
 
   const body = req.body ?? {};
   const rawText = typeof body.text === "string" ? body.text : "";
-  const text = rawText.trim() || getLastUserMessage(body.messages);
+  const text = stripLeadingAmicaExpressionTag(rawText.trim() || getLastUserMessage(body.messages)).trim();
 
   if (!text.trim()) {
     res.status(400).json({ error: "Missing text" });

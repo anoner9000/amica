@@ -128,6 +128,29 @@ describe("deiphobeChat handler", () => {
     },
   );
 
+  test.each([
+    ["[neutral] [", "["],
+    ["[neutral] (", "("],
+    ["[neutral] 6M41", "6M41"],
+    ["[neutral] 6741", "6741"],
+  ])("strips Amica expression tags before spawning governed runtime: %s", async (text, expectedText) => {
+    createMockChildProcess("I didn't catch enough there.\n");
+    const apiModule = await import("../src/pages/api/deiphobeChat");
+    const req = { method: "POST", body: { text } } as any;
+    const res = createResponse();
+
+    await apiModule.default(req, res as any);
+    await flushEvents();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe("I didn't catch enough there.\n");
+    expect(mockSpawn).toHaveBeenCalledWith(
+      "./ops/scripts/bus/deiphobe",
+      ["chat", "--text", expectedText],
+      expect.any(Object),
+    );
+  });
+
   test("returns Deiphobe self-identity from the governed bus runtime", async () => {
     createMockChildProcess("Deiphobe. That's me.\n");
     const apiModule = await import("../src/pages/api/deiphobeChat");
