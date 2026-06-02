@@ -13,6 +13,8 @@ describe("getDeiphobeChatResponseStream", () => {
   test.each([
     ["[neutral] [", "["],
     ["[neutral] (", "("],
+    ["[neutral] idk", "idk"],
+    ["[neutral] abc", "abc"],
     ["[neutral] 6741", "6741"],
     ["[neutral] 62651+", "62651+"],
   ])("sends visible text without Amica expression tag: %s", async (input, expectedText) => {
