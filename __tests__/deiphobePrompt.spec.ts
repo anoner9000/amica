@@ -8,6 +8,7 @@ describe("stripLeadingAmicaExpressionTag", () => {
     expect(stripLeadingAmicaExpressionTag("[neutral] (")).toBe("(");
     expect(stripLeadingAmicaExpressionTag("[neutral] 6M41")).toBe("6M41");
     expect(stripLeadingAmicaExpressionTag("[neutral] 6741")).toBe("6741");
+    expect(stripLeadingAmicaExpressionTag("[neutral] 62651+")).toBe("62651+");
   });
 
   test("leaves non-expression bracket text intact", () => {

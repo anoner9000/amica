@@ -1,4 +1,5 @@
 import { LipSyncAnalyzeResult } from "./lipSyncAnalyzeResult";
+import { resolveVoiceVolume } from "@/utils/voiceVolume";
 
 const TIME_DOMAIN_DATA_LENGTH = 2048;
 
@@ -31,14 +32,17 @@ export class LipSync {
     };
   }
 
-  public async playFromArrayBuffer(buffer: ArrayBuffer, onEnded?: () => void) {
+  public async playFromArrayBuffer(buffer: ArrayBuffer, onEnded?: () => void, volume = 1) {
     const audioBuffer = await this.audio.decodeAudioData(buffer);
 
     const bufferSource = this.audio.createBufferSource();
+    const gain = this.audio.createGain();
     bufferSource.buffer = audioBuffer;
+    gain.gain.value = resolveVoiceVolume(volume);
 
-    bufferSource.connect(this.audio.destination);
-    bufferSource.connect(this.analyser);
+    bufferSource.connect(gain);
+    gain.connect(this.audio.destination);
+    gain.connect(this.analyser);
     bufferSource.start();
     if (onEnded) {
       bufferSource.addEventListener("ended", onEnded);

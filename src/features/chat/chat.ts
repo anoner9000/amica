@@ -39,6 +39,7 @@ import { AmicaLife } from "@/features/amicaLife/amicaLife";
 import { config, updateConfig } from "@/utils/config";
 import { cleanTalk } from "@/utils/cleanTalk";
 import { processResponse } from "@/utils/processResponse";
+import { resolveVoiceVolume } from "@/utils/voiceVolume";
 import { wait } from "@/utils/wait";
 import isDev from '@/utils/isDev';
 
@@ -256,7 +257,11 @@ export class Chat {
 
         if (speak.audioBuffer) {
           this.setChatSpeaking!(true);
-          await this.viewer!.model?.speak(speak.audioBuffer, speak.screenplay);
+          await this.viewer!.model?.speak(
+            speak.audioBuffer,
+            speak.screenplay,
+            resolveVoiceVolume(config("tts_volume")),
+          );
           this.setChatSpeaking!(false);
           this.isAwake() ? this.updateAwake() : null;
         }

@@ -96,7 +96,7 @@ function flushEvents() {
 }
 
 describe("deiphobeChat handler", () => {
-  test.each(["[", "(", "6M41", "6741"])(
+  test.each(["[", "(", "6M41", "6741", "62651+"])(
     "routes noisy Deiphobe Local input through the governed bus runtime: %s",
     async (text) => {
       createMockChildProcess("I didn't catch enough there.\n");
@@ -133,6 +133,7 @@ describe("deiphobeChat handler", () => {
     ["[neutral] (", "("],
     ["[neutral] 6M41", "6M41"],
     ["[neutral] 6741", "6741"],
+    ["[neutral] 62651+", "62651+"],
   ])("strips Amica expression tags before spawning governed runtime: %s", async (text, expectedText) => {
     createMockChildProcess("I didn't catch enough there.\n");
     const apiModule = await import("../src/pages/api/deiphobeChat");

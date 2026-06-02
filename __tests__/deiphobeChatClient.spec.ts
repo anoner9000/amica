@@ -9,7 +9,12 @@ afterEach(() => {
 });
 
 describe("getDeiphobeChatResponseStream", () => {
-  test("sends visible text without Amica expression tag", async () => {
+  test.each([
+    ["[neutral] [", "["],
+    ["[neutral] (", "("],
+    ["[neutral] 6741", "6741"],
+    ["[neutral] 62651+", "62651+"],
+  ])("sends visible text without Amica expression tag: %s", async (input, expectedText) => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       body: new ReadableStream({
@@ -25,14 +30,14 @@ describe("getDeiphobeChatResponseStream", () => {
     const { getDeiphobeChatResponseStream } = await import("../src/features/chat/deiphobeChat");
     await getDeiphobeChatResponseStream([
       { role: "system", content: "system" },
-      { role: "user", content: "[neutral] 6M41" },
+      { role: "user", content: input },
     ]);
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/deiphobeChat",
       expect.objectContaining({
         method: "POST",
-        body: expect.stringContaining('"text":"6M41"'),
+        body: expect.stringContaining(`"text":"${expectedText}"`),
       }),
     );
     expect(fetchMock.mock.calls[0][1].body).not.toContain("[neutral]");
