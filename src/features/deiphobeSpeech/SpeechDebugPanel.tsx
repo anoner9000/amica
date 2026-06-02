@@ -4,7 +4,20 @@ import { mockSpeechPayload, type SpeechDebugPayload } from "./mockSpeechPayload"
 
 const SPEECH_DEBUG_ENDPOINT =
   process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_DEBUG_BRIDGE_URL ?? "/debug/deiphobe_speech_payload";
+const SPEECH_RENDER_ENDPOINT =
+  process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_RENDER_BRIDGE_URL ?? "/debug/deiphobe_speech_render";
 const DEFAULT_RENDER_OUTPUT = "/tmp/deiphobe-speech-test/debug.wav";
+const RENDER_OUTPUT_FILENAME = "deiphobe-debug-render.wav";
+
+type RenderResult = {
+  rendered: boolean;
+  status: string;
+  content_type?: string | null;
+  bytes_received?: number | null;
+  output_path?: string | null;
+  error?: string | null;
+  audio_url?: string | null;
+};
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -85,6 +98,9 @@ export function SpeechDebugPanel({ payload = mockSpeechPayload }: { payload?: Sp
   const [requestIncludeRenderRequest, setRequestIncludeRenderRequest] = useState(true);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isFetching, setIsFetching] = useState(false);
+  const [isRendering, setIsRendering] = useState(false);
+  const [renderResult, setRenderResult] = useState<RenderResult | null>(null);
+  const [renderStatusMessage, setRenderStatusMessage] = useState<string | null>(null);
 
   const renderRequest = currentPayload.piper_render_request;
   const renderCommandPreview = useMemo(
@@ -153,6 +169,44 @@ export function SpeechDebugPanel({ payload = mockSpeechPayload }: { payload?: Sp
       );
     } finally {
       setIsFetching(false);
+    }
+  }
+
+  async function renderAudio() {
+    setIsRendering(true);
+    setRenderStatusMessage(null);
+    try {
+      const response = await fetch(SPEECH_RENDER_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: requestText,
+          posture: requestPosture,
+          operator_name: requestOperatorName.trim() || undefined,
+          private_mode: requestPrivateMode,
+          include_render_request: requestIncludeRenderRequest,
+          output_filename: RENDER_OUTPUT_FILENAME,
+        }),
+      });
+
+      if (response.status === 403) {
+        setRenderStatusMessage("Speech render bridge is disabled");
+        return;
+      }
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        throw new Error(body.trim() || `Speech render bridge request failed (${response.status})`);
+      }
+
+      const result = (await response.json()) as RenderResult;
+      setRenderResult(result);
+    } catch (error) {
+      setRenderStatusMessage(
+        error instanceof Error ? error.message : "Failed to render audio.",
+      );
+    } finally {
+      setIsRendering(false);
     }
   }
 
@@ -268,6 +322,54 @@ export function SpeechDebugPanel({ payload = mockSpeechPayload }: { payload?: Sp
             </p>
           </div>
         </Section>
+        <Section title="Render Audio">
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                className="rounded-md bg-gray-700 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isRendering || isFetching}
+                onClick={renderAudio}
+              >
+                {isRendering ? "Rendering..." : "Render audio"}
+              </button>
+              <span className="text-xs text-gray-500">Endpoint: {SPEECH_RENDER_ENDPOINT}</span>
+            </div>
+            {renderStatusMessage ? (
+              <p role="alert" className="text-sm text-gray-700">
+                {renderStatusMessage}
+              </p>
+            ) : null}
+            <p className="text-xs text-gray-500">
+              Sends current text/posture to the local render bridge. No autoplay.
+            </p>
+          </div>
+        </Section>
+        {renderResult ? (
+          <Section title="Render Result">
+            <div className="space-y-1">
+              <KeyValue label="rendered" value={String(renderResult.rendered)} />
+              <KeyValue label="status" value={renderResult.status} />
+              {renderResult.content_type ? (
+                <KeyValue label="content_type" value={renderResult.content_type} />
+              ) : null}
+              {renderResult.bytes_received != null ? (
+                <KeyValue label="bytes_received" value={String(renderResult.bytes_received)} />
+              ) : null}
+              {renderResult.output_path ? (
+                <KeyValue label="output_path" value={renderResult.output_path} />
+              ) : null}
+              {renderResult.error ? (
+                <KeyValue label="error" value={renderResult.error} />
+              ) : null}
+              {renderResult.audio_url ? (
+                <div className="pt-1">
+                  <audio controls src={renderResult.audio_url} />
+                </div>
+              ) : null}
+            </div>
+          </Section>
+        ) : null}
         <Section title="avatar_cues">
           <div className="space-y-1">
             <KeyValue label="voice_mode" value={payloadPreview.avatar_cues.voice_mode} />

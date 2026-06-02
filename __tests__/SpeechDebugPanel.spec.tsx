@@ -255,6 +255,194 @@ describe("Deiphobe speech debug panel", () => {
     expect(container.textContent).toContain("Render command preview");
   });
 
+  test("no render request on initial render", async () => {
+    await renderDeveloperPage();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    const renderButton = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Render audio"),
+    );
+    expect(renderButton).toBeTruthy();
+    expect(container.querySelector("audio")).toBeNull();
+    expect(container.textContent).not.toContain("Render Result");
+  });
+
+  test("Render audio button sends expected POST body", async () => {
+    const renderResponse = {
+      rendered: true,
+      status: "rendered",
+      content_type: "audio/wav",
+      bytes_received: 63532,
+      output_path: "/tmp/deiphobe-speech-test/deiphobe-debug-render.wav",
+      error: null,
+      audio_url: null,
+    };
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => renderResponse,
+    });
+
+    await renderDeveloperPage();
+
+    const textArea = container.querySelector("textarea[name='text']") as HTMLTextAreaElement;
+    const postureInput = container.querySelector("input[name='posture']") as HTMLInputElement;
+    const operatorInput = container.querySelector("input[name='operator_name']") as HTMLInputElement;
+
+    await act(async () => {
+      Simulate.change(textArea, { target: { value: "I held the line." } });
+      Simulate.change(postureInput, { target: { value: "conversation_recency" } });
+      Simulate.change(operatorInput, { target: { value: "Uther" } });
+      await flush();
+    });
+
+    const renderButton = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Render audio"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      renderButton.click();
+      await flush();
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/debug/deiphobe_speech_render",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "I held the line.",
+          posture: "conversation_recency",
+          operator_name: "Uther",
+          private_mode: false,
+          include_render_request: true,
+          output_filename: "deiphobe-debug-render.wav",
+        }),
+      }),
+    );
+  });
+
+  test("successful render displays render result fields", async () => {
+    const renderResponse = {
+      rendered: true,
+      status: "rendered",
+      content_type: "audio/wav",
+      bytes_received: 63532,
+      output_path: "/tmp/deiphobe-speech-test/deiphobe-debug-render.wav",
+      error: null,
+      audio_url: null,
+    };
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => renderResponse,
+    });
+
+    await renderDeveloperPage();
+
+    const renderButton = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Render audio"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      renderButton.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("Render Result");
+    expect(container.textContent).toContain("rendered");
+    expect(container.textContent).toContain("true");
+    expect(container.textContent).toContain("rendered");
+    expect(container.textContent).toContain("audio/wav");
+    expect(container.textContent).toContain("63532");
+    expect(container.textContent).toContain("/tmp/deiphobe-speech-test/deiphobe-debug-render.wav");
+    expect(container.querySelector("audio")).toBeNull();
+  });
+
+  test("render 403 shows controlled error message", async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      text: async () => "Forbidden",
+    });
+
+    await renderDeveloperPage();
+
+    const renderButton = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Render audio"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      renderButton.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("Speech render bridge is disabled");
+    expect(container.textContent).toContain("I held the line.");
+    expect(container.querySelector("audio")).toBeNull();
+    expect(container.textContent).not.toContain("Render Result");
+  });
+
+  test("failed render preserves existing metadata payload", async () => {
+    (global.fetch as jest.Mock).mockRejectedValueOnce(new Error("render network error"));
+
+    await renderDeveloperPage();
+
+    const renderButton = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Render audio"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      renderButton.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("render network error");
+    expect(container.textContent).toContain("I held the line.");
+    expect(container.textContent).toContain("Render command preview");
+    expect(container.querySelector("audio")).toBeNull();
+  });
+
+  test("no autoplay attribute on audio element when audio_url is present", async () => {
+    const renderResponse = {
+      rendered: true,
+      status: "rendered",
+      content_type: "audio/wav",
+      bytes_received: 100,
+      output_path: "/tmp/deiphobe-speech-test/deiphobe-debug-render.wav",
+      error: null,
+      audio_url: "http://127.0.0.1:8769/audio/deiphobe-debug-render.wav",
+    };
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => renderResponse,
+    });
+
+    await renderDeveloperPage();
+
+    const renderButton = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Render audio"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      renderButton.click();
+      await flush();
+    });
+
+    const audioEl = container.querySelector("audio");
+    expect(audioEl).not.toBeNull();
+    expect(audioEl?.hasAttribute("autoplay")).toBe(false);
+  });
+
+  test("no audio element before successful render", async () => {
+    await renderDeveloperPage();
+    expect(container.querySelector("audio")).toBeNull();
+  });
+
   test("preview includes private mode when the fetched payload is private", async () => {
     const livePayload = {
       ...mockSpeechPayload,
