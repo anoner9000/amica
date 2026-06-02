@@ -52,36 +52,5 @@ export async function getDeiphobeChatResponseStream(
   if (!response.ok || !response.body) {
     throw new Error(`Deiphobe chat error (${response.status})`);
   }
-
-  const reader = response.body.getReader();
-  const stream = new ReadableStream({
-    async start(controller: ReadableStreamDefaultController) {
-      const decoder = new TextDecoder("utf-8");
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            break;
-          }
-
-          const chunk = decoder.decode(value, { stream: true });
-          if (chunk) {
-            controller.enqueue(chunk);
-          }
-        }
-      } catch (error) {
-        console.error("[Deiphobe] stream error", error);
-        controller.error(error);
-      } finally {
-        reader.releaseLock();
-        controller.close();
-      }
-    },
-    async cancel() {
-      await reader.cancel();
-      reader.releaseLock();
-    },
-  });
-
-  return stream;
+  return response.body;
 }
