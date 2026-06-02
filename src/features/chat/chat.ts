@@ -56,11 +56,13 @@ type Speak = {
   audioBuffer: ArrayBuffer | null;
   screenplay: Screenplay;
   streamIdx: number;
+  display?: boolean;
 };
 
 type TTSJob = {
   screenplay: Screenplay;
   streamIdx: number;
+  display?: boolean;
 };
 
 export class Chat {
@@ -226,6 +228,7 @@ export class Chat {
           audioBuffer,
           screenplay: ttsJob.screenplay,
           streamIdx: ttsJob.streamIdx,
+          display: ttsJob.display,
         });
       } while (this.ttsJobs.size() > 0);
       await wait(50);
@@ -253,7 +256,9 @@ export class Chat {
           }
         }
 
-        this.bubbleMessage("assistant", speak.screenplay.text);
+        if (speak.display !== false) {
+          this.bubbleMessage("assistant", speak.screenplay.text);
+        }
 
         if (speak.audioBuffer) {
           this.setChatSpeaking!(true);
@@ -401,7 +406,9 @@ export class Chat {
       // For external API
       await handleUserInput(message);
 
-      this.amicaLife?.receiveMessageFromUser(message);
+      if (config("chatbot_backend") !== "deiphobe") {
+        this.amicaLife?.receiveMessageFromUser(message);
+      }
 
       if (!/\[.*?\]/.test(message)) {
         message = `[neutral] ${message}`;
@@ -559,6 +566,10 @@ export class Chat {
     const streamIdx = this.currentStreamIdx;
     this.setChatProcessing!(true);
 
+    if (config("chatbot_backend") === "deiphobe") {
+      return await this.handleDeiphobeChatResponseStream(streamIdx);
+    }
+
     console.time("chat stream processing");
     let reader = this.streams[this.streams.length - 1].getReader();
     this.readers.push(reader);
@@ -660,6 +671,54 @@ export class Chat {
     }
 
     return aiTextLog;
+  }
+
+  private async handleDeiphobeChatResponseStream(streamIdx: number) {
+    console.time("chat stream processing");
+    let reader = this.streams[this.streams.length - 1].getReader();
+    this.readers.push(reader);
+    let receivedMessage = "";
+
+    try {
+      const decoder = new TextDecoder("utf-8");
+      while (true) {
+        if (this.currentStreamIdx !== streamIdx) {
+          console.log("wrong stream idx");
+          break;
+        }
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        receivedMessage += decoder.decode(value, { stream: true });
+      }
+      receivedMessage += decoder.decode();
+
+      const reply = receivedMessage.trim();
+      if (reply && this.currentStreamIdx === streamIdx) {
+        this.bubbleMessage("assistant", reply);
+        const screenplay = textsToScreenplay([`[neutral] ${reply}`])[0];
+        this.ttsJobs.enqueue({
+          screenplay,
+          streamIdx,
+          display: false,
+        });
+      }
+    } catch (e: any) {
+      const errMsg = e.toString();
+      this.bubbleMessage!("assistant", errMsg);
+      console.error(errMsg);
+    } finally {
+      if (!reader.closed) {
+        reader.releaseLock();
+      }
+      console.timeEnd("chat stream processing");
+      if (streamIdx === this.currentStreamIdx) {
+        this.setChatProcessing!(false);
+      }
+    }
+
+    return receivedMessage.trim();
   }
 
   async fetchAudio(talk: Talk): Promise<ArrayBuffer | null> {
