@@ -4,6 +4,7 @@ import {  BasicPage, FormRow } from './common';
 import { IconButton } from "@/components/iconButton";
 import { SwitchBox } from '@/components/switchBox';
 import { updateConfig } from "@/utils/config";
+import { SpeechDebugPanel } from '@/features/deiphobeSpeech/SpeechDebugPanel';
 
 const mtoonDebugModes = [
   {key: "none",          label: "None"},
@@ -111,6 +112,7 @@ export function DeveloperPage({
           </FormRow>
         </li>
       </ul>
+      <SpeechDebugPanel />
     </BasicPage>
   );
 }
