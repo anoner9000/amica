@@ -4,6 +4,7 @@ import { mockSpeechPayload, type SpeechDebugPayload } from "./mockSpeechPayload"
 
 const SPEECH_DEBUG_ENDPOINT =
   process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_DEBUG_BRIDGE_URL ?? "/debug/deiphobe_speech_payload";
+const DEFAULT_RENDER_OUTPUT = "/tmp/deiphobe-speech-test/debug.wav";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -21,6 +22,45 @@ function KeyValue({ label, value }: { label: string; value: React.ReactNode }) {
       <span className="break-all text-gray-800">{value}</span>
     </div>
   );
+}
+
+function shellQuote(value: string): string {
+  if (!value) {
+    return "''";
+  }
+  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function buildRenderCommandPreview({
+  text,
+  posture,
+  operatorName,
+  privateMode,
+}: {
+  text: string;
+  posture: string;
+  operatorName: string;
+  privateMode: boolean;
+}): string {
+  const parts = [
+    "python3",
+    "ops/scripts/deiphobe/speech_render_dry_run.py",
+    "--text",
+    shellQuote(text),
+    "--posture",
+    shellQuote(posture),
+  ];
+
+  if (operatorName.trim()) {
+    parts.push("--operator-name", shellQuote(operatorName.trim()));
+  }
+
+  if (privateMode) {
+    parts.push("--private-mode");
+  }
+
+  parts.push("--render", "--out", DEFAULT_RENDER_OUTPUT);
+  return parts.join(" ");
 }
 
 function isSpeechDebugPayload(value: unknown): value is SpeechDebugPayload {
@@ -47,6 +87,24 @@ export function SpeechDebugPanel({ payload = mockSpeechPayload }: { payload?: Sp
   const [isFetching, setIsFetching] = useState(false);
 
   const renderRequest = currentPayload.piper_render_request;
+  const renderCommandPreview = useMemo(
+    () =>
+      buildRenderCommandPreview({
+        text: requestText || currentPayload.visible_text,
+        posture: requestPosture || currentPayload.speech_plan.posture,
+        operatorName: requestOperatorName,
+        privateMode: requestPrivateMode || Boolean(currentPayload.avatar_cues.private_mode),
+      }),
+    [
+      currentPayload.avatar_cues.private_mode,
+      currentPayload.speech_plan.posture,
+      currentPayload.visible_text,
+      requestOperatorName,
+      requestPosture,
+      requestPrivateMode,
+      requestText,
+    ],
+  );
 
   const payloadPreview = useMemo(() => currentPayload, [currentPayload]);
 
@@ -84,6 +142,10 @@ export function SpeechDebugPanel({ payload = mockSpeechPayload }: { payload?: Sp
       }
 
       setCurrentPayload(nextPayload);
+      setRequestText(nextPayload.visible_text);
+      setRequestPosture(nextPayload.speech_plan.posture);
+      setRequestPrivateMode(Boolean(nextPayload.avatar_cues.private_mode));
+      setRequestIncludeRenderRequest(Boolean(nextPayload.piper_render_request));
       setStatusMessage("Fetched live speech metadata.");
     } catch (error) {
       setStatusMessage(
@@ -195,6 +257,16 @@ export function SpeechDebugPanel({ payload = mockSpeechPayload }: { payload?: Sp
           ) : (
             <p className="text-gray-500">No render request.</p>
           )}
+        </Section>
+        <Section title="Render command preview">
+          <div className="space-y-2">
+            <pre className="whitespace-pre-wrap rounded bg-white p-2 text-xs text-gray-900">
+              {renderCommandPreview}
+            </pre>
+            <p className="text-xs text-gray-500">
+              Preview only. This panel does not render or autoplay audio.
+            </p>
+          </div>
         </Section>
         <Section title="avatar_cues">
           <div className="space-y-1">

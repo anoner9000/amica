@@ -3,6 +3,7 @@ import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { Simulate } from "react-dom/test-utils";
+import { mockSpeechPayload } from "../src/features/deiphobeSpeech/SpeechDebugPanel";
 
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -86,8 +87,13 @@ describe("Deiphobe speech debug panel", () => {
     expect(container.textContent).toContain("voice_mode");
     expect(container.textContent).toContain("warm_recall");
     expect(container.textContent).toContain("piper_render_request");
+    expect(container.textContent).toContain("Render command preview");
+    expect(container.textContent).toContain("python3 ops/scripts/deiphobe/speech_render_dry_run.py");
+    expect(container.textContent).toContain("--render");
+    expect(container.textContent).toContain("--out /tmp/deiphobe-speech-test/debug.wav");
     expect(container.textContent).toContain("avatar_cues");
     expect(container.textContent).toContain("quiet_private");
+    expect(container.textContent).toContain("Preview only. This panel does not render or autoplay audio.");
     expect(container.textContent).toContain("Metadata only. No autoplay. No reply mutation.");
     expect(container.querySelector("audio")).toBeNull();
   });
@@ -202,6 +208,9 @@ describe("Deiphobe speech debug panel", () => {
     expect(container.textContent).toContain("Hello from the bridge.");
     expect(container.textContent).toContain("warm");
     expect(container.textContent).toContain("quiet_private");
+    expect(container.textContent).toContain("--text 'Hello from the bridge.'");
+    expect(container.textContent).toContain("--posture 'social_continuity'");
+    expect(container.textContent).toContain("--render");
   });
 
   test("shows disabled message for 403 and preserves the last payload", async () => {
@@ -224,6 +233,7 @@ describe("Deiphobe speech debug panel", () => {
 
     expect(container.textContent).toContain("Speech debug bridge is disabled");
     expect(container.textContent).toContain("I held the line.");
+    expect(container.textContent).toContain("Render command preview");
   });
 
   test("failed fetch shows an error and preserves previous payload", async () => {
@@ -242,5 +252,38 @@ describe("Deiphobe speech debug panel", () => {
 
     expect(container.textContent).toContain("network down");
     expect(container.textContent).toContain("I held the line.");
+    expect(container.textContent).toContain("Render command preview");
+  });
+
+  test("preview includes private mode when the fetched payload is private", async () => {
+    const livePayload = {
+      ...mockSpeechPayload,
+      avatar_cues: {
+        ...mockSpeechPayload.avatar_cues,
+        private_mode: true,
+        quiet_private: true,
+      },
+    };
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => livePayload,
+    });
+
+    await renderDeveloperPage();
+
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find((element) =>
+      element.textContent?.includes("Fetch speech payload"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("--private-mode");
+    expect(container.textContent).toContain("quiet_private");
+    expect(container.querySelector("audio")).toBeNull();
   });
 });
