@@ -23,6 +23,7 @@ import {
 import { getKoboldAiChatResponseStream } from "./koboldAiChat";
 import { getReasoingEngineChatResponseStream } from "./reasoiningEngineChat";
 import { getDeiphobeChatResponseStream } from "./deiphobeChat";
+import { shouldUseReasoningEngine } from "./chatBackendRouting";
 
 import { rvc } from "@/features/rvc/rvc";
 import { coquiLocal } from "@/features/coquiLocal/coquiLocal";
@@ -735,7 +736,7 @@ export class Chat {
     const systemPrompt = messages.find((msg) => msg.role === "system")!;
     const conversationMessages = messages.filter((msg) => msg.role !== "system");
 
-    if (config("reasoning_engine_enabled") === "true") {
+    if (shouldUseReasoningEngine(chatbotBackend, config("reasoning_engine_enabled"))) {
       return getReasoingEngineChatResponseStream(systemPrompt, conversationMessages)
     } 
 

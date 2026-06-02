@@ -5,6 +5,11 @@ import { handleConfig } from "@/features/externalAPI/externalAPI";
 import { config } from "@/utils/config";
 import { Message } from "@/features/chat/messages";
 
+function isTruthy(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
 function getLastUserMessage(messages: Message[] | undefined): string {
   if (!Array.isArray(messages)) {
     return "";
@@ -45,6 +50,8 @@ export default async function handler(
   const userId = config("deiphobe_user_id");
   const sessionId = config("deiphobe_session_id");
   const namespace = config("deiphobe_namespace");
+  const privateMode = config("deiphobe_private_mode");
+  const privateMemoryRoot = config("deiphobe_private_memory_root").trim();
   const timeoutSeconds = Number.parseInt(
     config("deiphobe_timeout_seconds") || "120",
     10,
@@ -56,16 +63,22 @@ export default async function handler(
     userId,
     sessionId,
     namespace,
+    privateMode: isTruthy(privateMode),
+    privateMemoryRoot: privateMemoryRoot ? "[configured]" : "[not configured]",
     timeoutSeconds,
     text,
   });
 
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     DEIPHOBE_CHAT_USER_ID: userId,
     DEIPHOBE_CHAT_SESSION_ID: sessionId,
     DEIPHOBE_CHAT_NAMESPACE: namespace,
+    DEIPHOBE_PRIVATE_MODE: isTruthy(privateMode) ? "1" : "0",
   };
+  if (privateMemoryRoot) {
+    env.DEIPHOBE_PRIVATE_MEMORY_ROOT = privateMemoryRoot;
+  }
 
   const child = spawn(command, ["chat", "--text", text], {
     cwd: repoRoot,
