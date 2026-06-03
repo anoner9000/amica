@@ -89,7 +89,13 @@ function isSpeechDebugPayload(value: unknown): value is SpeechDebugPayload {
   );
 }
 
-export function SpeechDebugPanel({ payload = mockSpeechPayload }: { payload?: SpeechDebugPayload }) {
+export function SpeechDebugPanel({
+  payload = mockSpeechPayload,
+  onDispatchCue,
+}: {
+  payload?: SpeechDebugPayload;
+  onDispatchCue?: (voiceMode: string) => Promise<void>;
+}) {
   const [currentPayload, setCurrentPayload] = useState<SpeechDebugPayload>(payload);
   const [requestText, setRequestText] = useState(payload.visible_text);
   const [requestPosture, setRequestPosture] = useState(payload.speech_plan.posture);
@@ -101,6 +107,8 @@ export function SpeechDebugPanel({ payload = mockSpeechPayload }: { payload?: Sp
   const [isRendering, setIsRendering] = useState(false);
   const [renderResult, setRenderResult] = useState<RenderResult | null>(null);
   const [renderStatusMessage, setRenderStatusMessage] = useState<string | null>(null);
+  const [isCueing, setIsCueing] = useState(false);
+  const [cueStatusMessage, setCueStatusMessage] = useState<string | null>(null);
 
   const renderRequest = currentPayload.piper_render_request;
   const renderCommandPreview = useMemo(
@@ -169,6 +177,23 @@ export function SpeechDebugPanel({ payload = mockSpeechPayload }: { payload?: Sp
       );
     } finally {
       setIsFetching(false);
+    }
+  }
+
+  async function dispatchAvatarCue() {
+    if (!onDispatchCue) return;
+    setIsCueing(true);
+    setCueStatusMessage(null);
+    try {
+      const voiceMode = currentPayload.avatar_cues.voice_mode;
+      await onDispatchCue(voiceMode);
+      setCueStatusMessage(`Dispatched ${voiceMode}`);
+    } catch (error) {
+      setCueStatusMessage(
+        error instanceof Error ? error.message : "Failed to dispatch avatar cue.",
+      );
+    } finally {
+      setIsCueing(false);
     }
   }
 
@@ -370,6 +395,30 @@ export function SpeechDebugPanel({ payload = mockSpeechPayload }: { payload?: Sp
             </div>
           </Section>
         ) : null}
+        <Section title="Avatar Cue Dispatch">
+          <div className="space-y-2">
+            <KeyValue label="voice_mode" value={currentPayload.avatar_cues.voice_mode} />
+            <KeyValue label="quiet_private" value={String(currentPayload.avatar_cues.quiet_private)} />
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                className="rounded-md bg-gray-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!onDispatchCue || isCueing || isFetching || isRendering}
+                onClick={dispatchAvatarCue}
+              >
+                {isCueing ? "Dispatching..." : "Dispatch avatar cue"}
+              </button>
+            </div>
+            {cueStatusMessage ? (
+              <p role="alert" className="text-sm text-gray-700">
+                {cueStatusMessage}
+              </p>
+            ) : null}
+            <p className="text-xs text-gray-500">
+              Sends current voice_mode to the local avatar. Debug-only. No autoplay.
+            </p>
+          </div>
+        </Section>
         <Section title="avatar_cues">
           <div className="space-y-1">
             <KeyValue label="voice_mode" value={payloadPreview.avatar_cues.voice_mode} />

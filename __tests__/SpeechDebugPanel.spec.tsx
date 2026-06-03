@@ -3,7 +3,7 @@ import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { Simulate } from "react-dom/test-utils";
-import { mockSpeechPayload } from "../src/features/deiphobeSpeech/SpeechDebugPanel";
+import { SpeechDebugPanel, mockSpeechPayload } from "../src/features/deiphobeSpeech/SpeechDebugPanel";
 
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -27,6 +27,23 @@ jest.mock("../src/components/settings/common", () => ({
 
 jest.mock("../src/components/switchBox", () => ({
   SwitchBox: ({ label }: { label: string }) => <button type="button">{label}</button>,
+}));
+
+jest.mock("../src/features/vrmViewer/viewerContext", () => {
+  const { createContext } = require("react");
+  return {
+    ViewerContext: createContext({ viewer: { model: undefined, resetCameraLerp: () => {} } }),
+  };
+});
+
+jest.mock("../src/features/vrmViewer/animationState", () => ({
+  resolveAnimationStatePath: jest.fn().mockResolvedValue("/animations/Relax.vrma"),
+  selectAnimationStateFromExpression: jest.fn().mockReturnValue(null),
+  selectAnimationStateFromPayload: jest.fn().mockReturnValue(null),
+}));
+
+jest.mock("../src/lib/VRMAnimation/loadVRMAnimation", () => ({
+  loadVRMAnimation: jest.fn().mockResolvedValue(null),
 }));
 
 function flush() {
@@ -473,5 +490,111 @@ describe("Deiphobe speech debug panel", () => {
     expect(container.textContent).toContain("--private-mode");
     expect(container.textContent).toContain("quiet_private");
     expect(container.querySelector("audio")).toBeNull();
+  });
+});
+
+describe("SpeechDebugPanel avatar cue dispatch", () => {
+  const originalActEnvironment = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+
+  beforeEach(() => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => { root.unmount(); });
+    container.remove();
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = originalActEnvironment;
+  });
+
+  async function renderPanel(onDispatchCue?: (voiceMode: string) => Promise<void>) {
+    await act(async () => {
+      root.render(<SpeechDebugPanel onDispatchCue={onDispatchCue} />);
+    });
+  }
+
+  test("no cue dispatch on page load", async () => {
+    const mockDispatch = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    await renderPanel(mockDispatch);
+    expect(mockDispatch).not.toHaveBeenCalled();
+  });
+
+  test("Dispatch avatar cue button is present in panel", async () => {
+    const mockDispatch = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    await renderPanel(mockDispatch);
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Dispatch avatar cue"),
+    );
+    expect(button).toBeTruthy();
+  });
+
+  test("Dispatch avatar cue button is disabled when no onDispatchCue is provided", async () => {
+    await renderPanel(undefined);
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Dispatch avatar cue"),
+    ) as HTMLButtonElement | undefined;
+    expect(button).toBeTruthy();
+    expect(button?.disabled).toBe(true);
+  });
+
+  test("Dispatch avatar cue button calls onDispatchCue with current voice_mode", async () => {
+    const mockDispatch = jest.fn<(voiceMode: string) => Promise<void>>().mockResolvedValue(undefined);
+    await renderPanel(mockDispatch);
+
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Dispatch avatar cue"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+      await flush();
+    });
+
+    expect(mockDispatch).toHaveBeenCalledTimes(1);
+    expect(mockDispatch).toHaveBeenCalledWith(mockSpeechPayload.avatar_cues.voice_mode);
+  });
+
+  test("successful dispatch shows confirmation status", async () => {
+    const mockDispatch = jest.fn<(voiceMode: string) => Promise<void>>().mockResolvedValue(undefined);
+    await renderPanel(mockDispatch);
+
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Dispatch avatar cue"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain(`Dispatched ${mockSpeechPayload.avatar_cues.voice_mode}`);
+  });
+
+  test("failed dispatch shows error status", async () => {
+    const mockDispatch = jest.fn<(voiceMode: string) => Promise<void>>().mockRejectedValue(
+      new Error("model not ready"),
+    );
+    await renderPanel(mockDispatch);
+
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Dispatch avatar cue"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("model not ready");
+  });
+
+  test("dispatch section shows current voice_mode and quiet_private from payload", async () => {
+    await renderPanel(undefined);
+    expect(container.textContent).toContain("Avatar Cue Dispatch");
+    expect(container.textContent).toContain(mockSpeechPayload.avatar_cues.voice_mode);
   });
 });

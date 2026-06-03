@@ -12,5 +12,14 @@
   "boundary": "/animations/Angry.vrma",
   "warm": "/animations/Blush.vrma",
   "standby": "/animations/Sleepy.vrma",
-  "energetic": "/animations/Jump.vrma"
+  "energetic": "/animations/Jump.vrma",
+  "warm_recall": "/animations/Blush.vrma",
+  "warm_reflective": "/animations/Thinking.vrma",
+  "focused": "/animations/Thinking.vrma",
+  "neutral_fact": "/animations/Relax.vrma",
+  "neutral_warm": "/animations/Blush.vrma",
+  "careful": "/animations/Thinking.vrma",
+  "careful_confirming": "/animations/Thinking.vrma",
+  "playful": "/animations/Jump.vrma",
+  "quiet_private": "/animations/Sleepy.vrma"
 }
