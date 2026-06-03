@@ -3,11 +3,12 @@ import { clsx } from "clsx";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import FlexTextarea from "@/components/flexTextarea/flexTextarea";
 import { Message } from "@/features/chat/messages";
+import { ChatSpeechRenderButton } from "@/features/deiphobeSpeech/ChatSpeechRenderButton";
 import { IconButton } from "@/components/iconButton";
 import {
   ArrowPathIcon,
 } from '@heroicons/react/20/solid';
-import { config } from "@/utils/config";
+import { getAssistantChatDisplayName } from "@/utils/chatDisplayName";
 import { ChatContext } from "@/features/chat/chatContext";
 import { saveAs } from 'file-saver';
 
@@ -186,7 +187,7 @@ function Chat({
         )}
       >
         <div className="text-bold text-white">
-          {role === "assistant" && config('name').toUpperCase()}
+          {role === "assistant" && getAssistantChatDisplayName()}
           {role === "user" && t("YOU")}
         </div>
         <button
@@ -203,7 +204,10 @@ function Chat({
       <div className="px-4 py-2 bg-white/80 backdrop-blur-lg rounded-b-lg shadow-sm">
         <div className='typography-16 font-M_PLUS_2 font-bold text-gray-800'>
           {role === "assistant" ? (
-            <div>{message}</div>
+            <>
+              <div>{message}</div>
+              <ChatSpeechRenderButton text={message} />
+            </>
           ) : (
             <FlexTextarea
               value={message}
