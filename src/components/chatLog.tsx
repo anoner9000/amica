@@ -28,6 +28,8 @@ export const ChatLog = ({
 
   const speechPreRenderEnabled =
     config("deiphobe_speech_prerender_enabled") === "true";
+  const speechAutoPlayEnabled =
+    config("deiphobe_speech_autoplay_enabled") === "true";
 
   const handleDispatchCue = viewer?.model
     ? async (voiceMode: string) => {
@@ -153,6 +155,9 @@ export const ChatLog = ({
               speechPreRenderEnabled &&
               msg.role === "assistant" &&
               msg.voice_posture !== "private_memory";
+            const autoPlayAfterRender =
+              autoPreRender &&
+              speechAutoPlayEnabled;
             return (
               <div key={i} ref={messages.length - 1 === i ? chatScrollRef : null}>
                 <Chat
@@ -164,6 +169,7 @@ export const ChatLog = ({
                   animation_state={msg.animation_state}
                   onDispatchCue={handleDispatchCue}
                   autoPreRender={autoPreRender}
+                  autoPlayAfterRender={autoPlayAfterRender}
                 />
 
               </div>
@@ -191,6 +197,7 @@ function Chat({
   animation_state,
   onDispatchCue,
   autoPreRender = false,
+  autoPlayAfterRender = false,
 }: {
   role: string;
   message: string;
@@ -200,6 +207,7 @@ function Chat({
   animation_state?: string;
   onDispatchCue?: (voiceMode: string) => Promise<void>;
   autoPreRender?: boolean;
+  autoPlayAfterRender?: boolean;
 }) {
   const { t } = useTranslation();
   // const [textAreaValue, setTextAreaValue] = useState(message);
@@ -242,7 +250,7 @@ function Chat({
           {role === "assistant" ? (
             <>
               <div>{message}</div>
-              <ChatSpeechRenderButton text={message} voice_posture={voice_posture} animation_state={animation_state} autoPreRender={autoPreRender} />
+              <ChatSpeechRenderButton text={message} voice_posture={voice_posture} animation_state={animation_state} autoPreRender={autoPreRender} autoPlayAfterRender={autoPlayAfterRender} />
               <ChatAvatarCueButton voice_posture={voice_posture} animation_state={animation_state} onDispatchCue={onDispatchCue} />
             </>
           ) : (

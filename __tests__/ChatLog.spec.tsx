@@ -370,11 +370,26 @@ describe("ChatLog — avatar cue button (D4)", () => {
 describe("ChatLog — D5 setting-gated pre-render", () => {
   const originalFetch = global.fetch;
   const originalActEnv = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+  let originalPlayDescriptor: PropertyDescriptor | undefined;
+  let originalMediaPlayDescriptor: PropertyDescriptor | undefined;
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
+  let playMock: jest.Mock;
 
   function getConfigMock() {
     return (require("../src/utils/config") as { config: typeof ConfigFn }).config as jest.Mock;
+  }
+
+  function setSpeechConfig(prerenderEnabled = false, autoplayEnabled = false) {
+    getConfigMock().mockImplementation((key: string) => {
+      if (key === "deiphobe_speech_prerender_enabled") {
+        return prerenderEnabled ? "true" : "false";
+      }
+      if (key === "deiphobe_speech_autoplay_enabled") {
+        return autoplayEnabled ? "true" : "false";
+      }
+      return "false";
+    });
   }
 
   beforeEach(async () => {
@@ -383,23 +398,48 @@ describe("ChatLog — D5 setting-gated pre-render", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     global.fetch = jest.fn() as any;
-    getConfigMock().mockReturnValue("false");
+    setSpeechConfig(false, false);
+    originalPlayDescriptor = Object.getOwnPropertyDescriptor(HTMLAudioElement.prototype, "play");
+    originalMediaPlayDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "play");
+    playMock = jest.fn().mockResolvedValue(undefined);
+    Object.defineProperty(HTMLAudioElement.prototype, "play", {
+      configurable: true,
+      value: playMock,
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "play", {
+      configurable: true,
+      value: playMock,
+    });
   });
 
   afterEach(() => {
     act(() => { root.unmount(); });
     container.remove();
     global.fetch = originalFetch;
+    if (originalPlayDescriptor) {
+      Object.defineProperty(HTMLAudioElement.prototype, "play", originalPlayDescriptor);
+    }
+    if (originalMediaPlayDescriptor) {
+      Object.defineProperty(HTMLMediaElement.prototype, "play", originalMediaPlayDescriptor);
+    }
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = originalActEnv;
   });
 
-  async function renderChatLog(messages: MsgPartial[], prerenderEnabled = false) {
-    getConfigMock().mockReturnValue(prerenderEnabled ? "true" : "false");
+  async function renderChatLog(
+    messages: MsgPartial[],
+    prerenderEnabled = false,
+    autoplayEnabled = false,
+  ) {
+    setSpeechConfig(prerenderEnabled, autoplayEnabled);
     const { ChatLog } = await import("../src/components/chatLog");
     await act(async () => {
       root.render(<ChatLog messages={messages as any} />);
       await new Promise((r) => setTimeout(r, 0));
     });
+  }
+
+  function getAudio(): HTMLAudioElement | null {
+    return container.querySelector("audio");
   }
 
   // ── setting disabled → no auto fetch ─────────────────────────────────────
@@ -426,6 +466,36 @@ describe("ChatLog — D5 setting-gated pre-render", () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
+  // ── autoplay only when both settings are enabled ─────────────────────────
+
+  test("setting enabled without autoplay — assistant message does not call play()", async () => {
+    (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue({
+      ok: true,
+      json: async () => ({ rendered: true, status: "rendered", audio_url: AUDIO_URL }),
+    } as any);
+    await renderChatLog(
+      [{ role: "assistant", content: "I held the line.", voice_posture: "memory_recall" }],
+      true,
+      false,
+    );
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(playMock).not.toHaveBeenCalled();
+  });
+
+  test("setting enabled with autoplay — assistant message calls play() after successful pre-render", async () => {
+    (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue({
+      ok: true,
+      json: async () => ({ rendered: true, status: "rendered", audio_url: AUDIO_URL }),
+    } as any);
+    await renderChatLog(
+      [{ role: "assistant", content: "I held the line.", voice_posture: "memory_recall" }],
+      true,
+      true,
+    );
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(playMock).toHaveBeenCalledTimes(1);
+  });
+
   // ── user messages never pre-render ────────────────────────────────────────
 
   test("setting enabled — user messages do not trigger pre-render", async () => {
@@ -436,6 +506,16 @@ describe("ChatLog — D5 setting-gated pre-render", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  test("setting enabled — user messages never autoplay", async () => {
+    await renderChatLog(
+      [{ role: "user", content: "Hello there." }],
+      true,
+      true,
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(playMock).not.toHaveBeenCalled();
+  });
+
   // ── private_memory is not pre-rendered ───────────────────────────────────
 
   test("setting enabled — private_memory messages are not pre-rendered", async () => {
@@ -444,6 +524,16 @@ describe("ChatLog — D5 setting-gated pre-render", () => {
       true,
     );
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("setting enabled — private_memory messages never autoplay", async () => {
+    await renderChatLog(
+      [{ role: "assistant", content: "This stays private.", voice_posture: "private_memory" }],
+      true,
+      true,
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(playMock).not.toHaveBeenCalled();
   });
 
   // ── no avatar cue from pre-render ─────────────────────────────────────────
@@ -458,5 +548,19 @@ describe("ChatLog — D5 setting-gated pre-render", () => {
       true,
     );
     expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("bridge failure does not autoplay", async () => {
+    (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue({
+      ok: true,
+      json: async () => ({ rendered: false, status: "failed", error: "Piper unavailable" }),
+    } as any);
+    await renderChatLog(
+      [{ role: "assistant", content: "I held the line.", voice_posture: "memory_recall" }],
+      true,
+      true,
+    );
+    expect(playMock).not.toHaveBeenCalled();
+    expect(getAudio()).toBeNull();
   });
 });

@@ -39,6 +39,7 @@
   "deiphobe_timeout_seconds": "120",
   "deiphobe_private_mode": "true",
   "deiphobe_private_memory_root": "/home/kyler/.clawdawg-private/deiphobe_memory",
+  "deiphobe_speech_autoplay_enabled": "false",
   "llamacpp_url": "http://127.0.0.1:8080",
   "llamacpp_stop_sequence": "(End)||[END]||Note||***||You:||User:||</s>",
   "ollama_url": "http://localhost:11434",

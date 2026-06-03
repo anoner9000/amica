@@ -5,6 +5,7 @@ import { BasicPage, FormRow, NotUsingAlert } from './common';
 import { TextInput } from "@/components/textInput";
 import { TextButton } from "@/components/textButton";
 import { config, updateConfig } from "@/utils/config";
+import { SwitchBox } from "@/components/switchBox";
 
 type PrivateMemoryStatus = {
   privateMode: boolean;
@@ -271,6 +272,8 @@ export function DeiphobeSettingsPage({
   setDeiphobePrivateMode,
   deiphobePrivateMemoryRoot,
   setDeiphobePrivateMemoryRoot,
+  deiphobeSpeechAutoplayEnabled,
+  setDeiphobeSpeechAutoplayEnabled,
   setSettingsUpdated,
 }: {
   deiphobeRepoRoot: string;
@@ -289,6 +292,8 @@ export function DeiphobeSettingsPage({
   setDeiphobePrivateMode: (value: string) => void;
   deiphobePrivateMemoryRoot: string;
   setDeiphobePrivateMemoryRoot: (value: string) => void;
+  deiphobeSpeechAutoplayEnabled: boolean;
+  setDeiphobeSpeechAutoplayEnabled: (value: boolean) => void;
   setSettingsUpdated: (updated: boolean) => void;
 }) {
   const { t } = useTranslation();
@@ -390,6 +395,19 @@ export function DeiphobeSettingsPage({
               onChange={(event: React.ChangeEvent<any>) => {
                 setDeiphobePrivateMode(event.target.value);
                 updateConfig("deiphobe_private_mode", event.target.value);
+                setSettingsUpdated(true);
+              }}
+            />
+          </FormRow>
+        </li>
+        <li className="py-4">
+          <FormRow label={t("Speech Autoplay")}>
+            <SwitchBox
+              value={deiphobeSpeechAutoplayEnabled}
+              label={t("Autoplay speech after successful background pre-render")}
+              onChange={(value: boolean) => {
+                setDeiphobeSpeechAutoplayEnabled(value);
+                updateConfig("deiphobe_speech_autoplay_enabled", value.toString());
                 setSettingsUpdated(true);
               }}
             />

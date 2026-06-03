@@ -103,6 +103,7 @@ export const Settings = ({
   const [deiphobeTimeoutSeconds, setDeiphobeTimeoutSeconds] = useState(config("deiphobe_timeout_seconds"));
   const [deiphobePrivateMode, setDeiphobePrivateMode] = useState(config("deiphobe_private_mode"));
   const [deiphobePrivateMemoryRoot, setDeiphobePrivateMemoryRoot] = useState(config("deiphobe_private_memory_root"));
+  const [deiphobeSpeechAutoplayEnabled, setDeiphobeSpeechAutoplayEnabled] = useState<boolean>(config("deiphobe_speech_autoplay_enabled") === 'true' ? true : false);
   const [llamaCppUrl, setLlamaCppUrl] = useState(config("llamacpp_url"));
   const [llamaCppStopSequence, setLlamaCppStopSequence] = useState(config("llamacpp_stop_sequence"));
   const [ollamaUrl, setOllamaUrl] = useState(config("ollama_url"));
@@ -285,6 +286,7 @@ export const Settings = ({
     arbiusLLMModelId,
     openAIApiKey, openAIUrl, openAIModel,
     deiphobeRepoRoot, deiphobeCommand, deiphobeUserId, deiphobeSessionId, deiphobeNamespace, deiphobeTimeoutSeconds, deiphobePrivateMode, deiphobePrivateMemoryRoot,
+    deiphobeSpeechAutoplayEnabled,
     llamaCppUrl, llamaCppStopSequence,
     ollamaUrl, ollamaModel,
     koboldAiUrl, koboldAiUseExtra, koboldAiStopSequence,
@@ -507,6 +509,8 @@ export const Settings = ({
         setDeiphobePrivateMode={setDeiphobePrivateMode}
         deiphobePrivateMemoryRoot={deiphobePrivateMemoryRoot}
         setDeiphobePrivateMemoryRoot={setDeiphobePrivateMemoryRoot}
+        deiphobeSpeechAutoplayEnabled={deiphobeSpeechAutoplayEnabled}
+        setDeiphobeSpeechAutoplayEnabled={setDeiphobeSpeechAutoplayEnabled}
         setSettingsUpdated={setSettingsUpdated}
         />
 

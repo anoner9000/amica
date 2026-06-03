@@ -44,6 +44,7 @@ export const defaults = {
   deiphobe_timeout_seconds: process.env.NEXT_PUBLIC_DEIPHOBE_TIMEOUT_SECONDS ?? '120',
   deiphobe_private_mode: process.env.NEXT_PUBLIC_DEIPHOBE_PRIVATE_MODE ?? 'false',
   deiphobe_private_memory_root: process.env.NEXT_PUBLIC_DEIPHOBE_PRIVATE_MEMORY_ROOT ?? '',
+  deiphobe_speech_autoplay_enabled: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_AUTOPLAY_ENABLED ?? 'false',
   llamacpp_url: process.env.NEXT_PUBLIC_LLAMACPP_URL ?? 'http://127.0.0.1:8080',
   llamacpp_stop_sequence: process.env.NEXT_PUBLIC_LLAMACPP_STOP_SEQUENCE ?? '(End)||[END]||Note||***||You:||User:||</s>',
   ollama_url: process.env.NEXT_PUBLIC_OLLAMA_URL ?? 'http://localhost:11434',

@@ -16,17 +16,22 @@ export function ChatSpeechRenderButton({
   animation_state,
   renderEndpoint = SPEECH_RENDER_ENDPOINT,
   autoPreRender = false,
+  autoPlayAfterRender = false,
 }: {
   text: string;
   voice_posture?: string;
   animation_state?: string;
   renderEndpoint?: string;
   autoPreRender?: boolean;
+  autoPlayAfterRender?: boolean;
 }) {
   const [isRendering, setIsRendering] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
+  const [playbackStatus, setPlaybackStatus] = useState<string | null>(null);
   const preRenderFired = useRef(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const autoPlayFiredForUrl = useRef<string | null>(null);
 
   const effectivePosture =
     (voice_posture ?? "").trim() || (animation_state ?? "").trim() || "neutral";
@@ -35,6 +40,7 @@ export function ChatSpeechRenderButton({
     if (isRendering) return;
     setIsRendering(true);
     setRenderError(null);
+    setPlaybackStatus(null);
     try {
       const resp = await fetch(renderEndpoint, {
         method: "POST",
@@ -60,6 +66,38 @@ export function ChatSpeechRenderButton({
   }
 
   useEffect(() => {
+    if (!autoPreRender || !autoPlayAfterRender) return;
+    if (!audioUrl) return;
+    if (autoPlayFiredForUrl.current === audioUrl) return;
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    autoPlayFiredForUrl.current = audioUrl;
+    setPlaybackStatus(null);
+
+    let playback: Promise<void> | undefined;
+    try {
+      playback = audio.play();
+    } catch (error: any) {
+      setPlaybackStatus("Autoplay blocked by browser. Press play manually.");
+      return;
+    }
+
+    if (playback && typeof playback.then === "function") {
+      void playback
+        .then(() => {
+          setPlaybackStatus("Autoplay started.");
+        })
+        .catch(() => {
+          setPlaybackStatus("Autoplay blocked by browser. Press play manually.");
+        });
+      return;
+    }
+
+    setPlaybackStatus("Autoplay started.");
+  }, [audioUrl, autoPreRender, autoPlayAfterRender]);
+
+  useEffect(() => {
     if (!autoPreRender) return;
     if (preRenderFired.current) return;
     preRenderFired.current = true;
@@ -79,8 +117,11 @@ export function ChatSpeechRenderButton({
       {renderError !== null && (
         <p className="mt-1 text-xs text-red-500">{renderError}</p>
       )}
+      {playbackStatus !== null && (
+        <p className="mt-1 text-xs text-amber-600">{playbackStatus}</p>
+      )}
       {audioUrl !== null && (
-        <audio controls src={audioUrl} className="mt-1 w-full max-w-xs" />
+        <audio ref={audioRef} controls src={audioUrl} className="mt-1 w-full max-w-xs" />
       )}
     </div>
   );

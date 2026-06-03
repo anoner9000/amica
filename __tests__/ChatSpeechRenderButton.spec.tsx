@@ -30,8 +30,11 @@ function flush() {
 describe("ChatSpeechRenderButton", () => {
   const originalFetch = global.fetch;
   const originalActEnvironment = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+  let originalAudioPlayDescriptor: PropertyDescriptor | undefined;
+  let originalMediaPlayDescriptor: PropertyDescriptor | undefined;
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
+  let playSpy: jest.Mock;
 
   beforeEach(() => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -39,6 +42,17 @@ describe("ChatSpeechRenderButton", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     global.fetch = jest.fn() as any;
+    originalAudioPlayDescriptor = Object.getOwnPropertyDescriptor(HTMLAudioElement.prototype, "play");
+    originalMediaPlayDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "play");
+    playSpy = jest.fn().mockResolvedValue(undefined);
+    Object.defineProperty(HTMLAudioElement.prototype, "play", {
+      configurable: true,
+      value: playSpy,
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "play", {
+      configurable: true,
+      value: playSpy,
+    });
   });
 
   afterEach(() => {
@@ -47,6 +61,12 @@ describe("ChatSpeechRenderButton", () => {
     });
     container.remove();
     global.fetch = originalFetch;
+    if (originalAudioPlayDescriptor) {
+      Object.defineProperty(HTMLAudioElement.prototype, "play", originalAudioPlayDescriptor);
+    }
+    if (originalMediaPlayDescriptor) {
+      Object.defineProperty(HTMLMediaElement.prototype, "play", originalMediaPlayDescriptor);
+    }
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = originalActEnvironment;
   });
 
@@ -54,6 +74,7 @@ describe("ChatSpeechRenderButton", () => {
     text?: string;
     voice_posture?: string;
     animation_state?: string;
+    autoPlayAfterRender?: boolean;
   } = {}) {
     act(() => {
       root.render(
@@ -62,6 +83,7 @@ describe("ChatSpeechRenderButton", () => {
           voice_posture={props.voice_posture}
           animation_state={props.animation_state}
           renderEndpoint={TEST_ENDPOINT}
+          autoPlayAfterRender={props.autoPlayAfterRender}
         />,
       );
     });
@@ -195,6 +217,28 @@ describe("ChatSpeechRenderButton", () => {
     expect(getAudio()?.hasAttribute("autoplay")).toBe(false);
   });
 
+  // ── controlled autoplay gate ─────────────────────────────────────────────
+
+  test("autoplay remains off by default even when pre-render succeeds", async () => {
+    mockFetch(makeSuccessResponse(AUDIO_URL));
+    renderButton({ autoPlayAfterRender: false, voice_posture: "memory_recall" });
+    await act(async () => {
+      Simulate.click(getButton());
+      await flush();
+    });
+    expect(playSpy).not.toHaveBeenCalled();
+  });
+
+  test("manual render does not autoplay even if autoplay is enabled", async () => {
+    mockFetch(makeSuccessResponse(AUDIO_URL));
+    renderButton({ autoPlayAfterRender: true, voice_posture: "memory_recall" });
+    await act(async () => {
+      Simulate.click(getButton());
+      await flush();
+    });
+    expect(playSpy).not.toHaveBeenCalled();
+  });
+
   // ── bridge failure: text intact, safe error shown ─────────────────────────
 
   test("bridge failure shows error message and no audio element", async () => {
@@ -206,6 +250,7 @@ describe("ChatSpeechRenderButton", () => {
     });
     expect(getAudio()).toBeNull();
     expect(getError()).toContain("Piper unavailable");
+    expect(playSpy).not.toHaveBeenCalled();
   });
 
   test("network error shows error message and no audio element", async () => {
@@ -219,6 +264,7 @@ describe("ChatSpeechRenderButton", () => {
     });
     expect(getAudio()).toBeNull();
     expect(getError()).toContain("Network error");
+    expect(playSpy).not.toHaveBeenCalled();
   });
 
   // ── no avatar cue dispatched ──────────────────────────────────────────────
@@ -240,8 +286,11 @@ describe("ChatSpeechRenderButton", () => {
 describe("ChatSpeechRenderButton — D5 auto pre-render", () => {
   const originalFetch = global.fetch;
   const originalActEnvironment = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+  let originalAudioPlayDescriptor: PropertyDescriptor | undefined;
+  let originalMediaPlayDescriptor: PropertyDescriptor | undefined;
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
+  let playMock: jest.Mock;
 
   beforeEach(() => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -249,12 +298,29 @@ describe("ChatSpeechRenderButton — D5 auto pre-render", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     global.fetch = jest.fn() as any;
+    originalAudioPlayDescriptor = Object.getOwnPropertyDescriptor(HTMLAudioElement.prototype, "play");
+    originalMediaPlayDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "play");
+    playMock = jest.fn().mockResolvedValue(undefined);
+    Object.defineProperty(HTMLAudioElement.prototype, "play", {
+      configurable: true,
+      value: playMock,
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "play", {
+      configurable: true,
+      value: playMock,
+    });
   });
 
   afterEach(() => {
     act(() => { root.unmount(); });
     container.remove();
     global.fetch = originalFetch;
+    if (originalAudioPlayDescriptor) {
+      Object.defineProperty(HTMLAudioElement.prototype, "play", originalAudioPlayDescriptor);
+    }
+    if (originalMediaPlayDescriptor) {
+      Object.defineProperty(HTMLMediaElement.prototype, "play", originalMediaPlayDescriptor);
+    }
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = originalActEnvironment;
   });
 
@@ -319,6 +385,25 @@ describe("ChatSpeechRenderButton — D5 auto pre-render", () => {
     );
   });
 
+  test("setting enabled with autoplay — play is called after successful background pre-render", async () => {
+    mockFetch(makeSuccessResponse(AUDIO_URL));
+    await act(async () => {
+      root.render(
+        <ChatSpeechRenderButton
+          text="I held the line."
+          voice_posture="memory_recall"
+          renderEndpoint={TEST_ENDPOINT}
+          autoPreRender={true}
+          autoPlayAfterRender={true}
+        />,
+      );
+      await flush();
+      await flush();
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(playMock).toHaveBeenCalledTimes(1);
+  });
+
   // ── no autoplay ───────────────────────────────────────────────────────────
 
   test("auto-rendered audio has no autoplay attribute", async () => {
@@ -336,6 +421,26 @@ describe("ChatSpeechRenderButton — D5 auto pre-render", () => {
     const audio = getAudio();
     expect(audio).not.toBeNull();
     expect(audio?.hasAttribute("autoplay")).toBe(false);
+    expect(playMock).not.toHaveBeenCalled();
+  });
+
+  test("play rejection shows safe status and keeps audio controls", async () => {
+    playMock.mockRejectedValueOnce(new Error("blocked by browser"));
+    mockFetch(makeSuccessResponse(AUDIO_URL));
+    await act(async () => {
+      root.render(
+        <ChatSpeechRenderButton
+          text="I held the line."
+          renderEndpoint={TEST_ENDPOINT}
+          autoPreRender={true}
+          autoPlayAfterRender={true}
+        />,
+      );
+      await flush();
+      await flush();
+    });
+    expect(getAudio()).not.toBeNull();
+    expect(container.textContent).toContain("Autoplay blocked by browser. Press play manually.");
   });
 
   // ── no avatar cue dispatch ────────────────────────────────────────────────
