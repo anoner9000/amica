@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 
+import { resolveAnimationStatePath } from "../vrmViewer/animationState";
 import { mockSpeechPayload, type SpeechDebugPayload } from "./mockSpeechPayload";
 
 const SPEECH_DEBUG_ENDPOINT =
@@ -8,6 +9,20 @@ const SPEECH_RENDER_ENDPOINT =
   process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_RENDER_BRIDGE_URL ?? "/debug/deiphobe_speech_render";
 const DEFAULT_RENDER_OUTPUT = "/tmp/deiphobe-speech-test/debug.wav";
 const RENDER_OUTPUT_FILENAME = "deiphobe-debug-render.wav";
+
+const VOICE_POSTURE_OPTIONS = [
+  "operational_troubleshooting",
+  "governed_system_fact",
+  "bounded_reflection",
+  "social_continuity",
+  "conversation_recency",
+  "memory_recall",
+  "memory_write",
+  "creative_chat",
+  "ordinary_chat",
+  "private_memory",
+  "neutral",
+] as const;
 
 type RenderResult = {
   rendered: boolean;
@@ -92,9 +107,11 @@ function isSpeechDebugPayload(value: unknown): value is SpeechDebugPayload {
 export function SpeechDebugPanel({
   payload = mockSpeechPayload,
   onDispatchCue,
+  onResolveAnimationPath = resolveAnimationStatePath,
 }: {
   payload?: SpeechDebugPayload;
   onDispatchCue?: (voiceMode: string) => Promise<void>;
+  onResolveAnimationPath?: (voiceMode: string) => Promise<string>;
 }) {
   const [currentPayload, setCurrentPayload] = useState<SpeechDebugPayload>(payload);
   const [requestText, setRequestText] = useState(payload.visible_text);
@@ -109,6 +126,10 @@ export function SpeechDebugPanel({
   const [renderStatusMessage, setRenderStatusMessage] = useState<string | null>(null);
   const [isCueing, setIsCueing] = useState(false);
   const [cueStatusMessage, setCueStatusMessage] = useState<string | null>(null);
+  const [postureOverride, setPostureOverride] = useState<string>("");
+  const [resolvedAnimPath, setResolvedAnimPath] = useState<string | null>(null);
+
+  const effectiveVoiceMode = postureOverride || currentPayload.avatar_cues.voice_mode;
 
   const renderRequest = currentPayload.piper_render_request;
   const renderCommandPreview = useMemo(
@@ -185,9 +206,11 @@ export function SpeechDebugPanel({
     setIsCueing(true);
     setCueStatusMessage(null);
     try {
-      const voiceMode = currentPayload.avatar_cues.voice_mode;
-      await onDispatchCue(voiceMode);
-      setCueStatusMessage(`Dispatched ${voiceMode}`);
+      const resolvedPath = await onResolveAnimationPath(effectiveVoiceMode);
+      setResolvedAnimPath(resolvedPath);
+      await onDispatchCue(effectiveVoiceMode);
+      const overrideNote = postureOverride ? ` (override: ${postureOverride})` : "";
+      setCueStatusMessage(`Dispatched ${effectiveVoiceMode}${overrideNote}`);
     } catch (error) {
       setCueStatusMessage(
         error instanceof Error ? error.message : "Failed to dispatch avatar cue.",
@@ -234,6 +257,13 @@ export function SpeechDebugPanel({
       setIsRendering(false);
     }
   }
+
+  async function renderAndCue() {
+    await renderAudio();
+    await dispatchAvatarCue();
+  }
+
+  const isBusy = isFetching || isRendering || isCueing;
 
   return (
     <div className="mt-6 rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4">
@@ -312,6 +342,27 @@ export function SpeechDebugPanel({
             ) : null}
           </div>
         </Section>
+
+        <Section title="Cue Preview">
+          <div className="space-y-1">
+            <KeyValue
+              label="voice_mode"
+              value={
+                <span className="font-semibold text-indigo-700">
+                  {effectiveVoiceMode}
+                  {postureOverride ? " (override)" : ""}
+                </span>
+              }
+            />
+            <KeyValue label="animation path" value={resolvedAnimPath ?? "—  dispatch to resolve"} />
+            <KeyValue label="pace" value={payloadPreview.speech_plan.pace} />
+            <KeyValue label="pitch_shape" value={payloadPreview.speech_plan.pitch_shape} />
+            <KeyValue label="pause_before_ms" value={String(payloadPreview.speech_plan.pause_before_ms)} />
+            <KeyValue label="pauses" value={String(payloadPreview.speech_plan.pauses.length)} />
+            <KeyValue label="posture (request)" value={payloadPreview.speech_plan.posture} />
+          </div>
+        </Section>
+
         <Section title="Visible Text">
           <pre className="whitespace-pre-wrap rounded bg-white p-2 text-xs text-gray-900">{payloadPreview.visible_text}</pre>
         </Section>
@@ -396,14 +447,40 @@ export function SpeechDebugPanel({
           </Section>
         ) : null}
         <Section title="Avatar Cue Dispatch">
-          <div className="space-y-2">
-            <KeyValue label="voice_mode" value={currentPayload.avatar_cues.voice_mode} />
-            <KeyValue label="quiet_private" value={String(currentPayload.avatar_cues.quiet_private)} />
-            <div className="flex items-center gap-3">
+          <div className="space-y-3">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">
+                voice_posture override (debug only)
+              </span>
+              <select
+                name="voice_posture_override"
+                className="w-full rounded-md border border-gray-300 bg-white p-2 text-sm text-gray-900"
+                value={postureOverride}
+                onChange={(event) => setPostureOverride(event.target.value)}
+              >
+                <option value="">use payload ({currentPayload.avatar_cues.voice_mode})</option>
+                {VOICE_POSTURE_OPTIONS.map((posture) => (
+                  <option key={posture} value={posture}>{posture}</option>
+                ))}
+              </select>
+            </label>
+            <div className="space-y-1">
+              <KeyValue label="voice_mode" value={effectiveVoiceMode} />
+              <KeyValue label="quiet_private" value={String(currentPayload.avatar_cues.quiet_private)} />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="rounded-md bg-indigo-700 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!onDispatchCue || isBusy}
+                onClick={renderAndCue}
+              >
+                {isRendering ? "Rendering…" : isCueing ? "Cueing…" : "Render + Cue"}
+              </button>
               <button
                 type="button"
                 className="rounded-md bg-gray-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={!onDispatchCue || isCueing || isFetching || isRendering}
+                disabled={!onDispatchCue || isBusy}
                 onClick={dispatchAvatarCue}
               >
                 {isCueing ? "Dispatching..." : "Dispatch avatar cue"}
