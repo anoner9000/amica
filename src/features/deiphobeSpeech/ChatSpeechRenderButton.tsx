@@ -29,7 +29,7 @@ export function ChatSpeechRenderButton({
   const preRenderFired = useRef(false);
 
   const effectivePosture =
-    (voice_posture ?? "").trim() || (animation_state ?? "").trim() || "";
+    (voice_posture ?? "").trim() || (animation_state ?? "").trim() || "neutral";
 
   async function handleRender() {
     if (isRendering) return;

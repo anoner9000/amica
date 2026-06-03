@@ -195,7 +195,7 @@ describe("ChatLog — voice_posture plumbing", () => {
 
   // ── messages without metadata render normally ─────────────────────────────
 
-  test("messages without metadata still render the button with empty posture", async () => {
+  test("messages without metadata send posture neutral to the render bridge", async () => {
     mockFetchSuccess();
     await renderChatLog([
       { role: "assistant", content: "Hello." },
@@ -208,7 +208,7 @@ describe("ChatLog — voice_posture plumbing", () => {
     });
     const [, init] = (global.fetch as jest.Mock<typeof fetch>).mock.calls[0];
     const body = JSON.parse((init as RequestInit).body as string);
-    expect(body.posture).toBe("");
+    expect(body.posture).toBe("neutral");
     expect(body.text).toBe("Hello.");
   });
 

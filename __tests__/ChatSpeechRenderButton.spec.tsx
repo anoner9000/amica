@@ -135,7 +135,7 @@ describe("ChatSpeechRenderButton", () => {
     expect(body.posture).toBe("warm");
   });
 
-  test("uses empty posture when neither voice_posture nor animation_state is provided", async () => {
+  test("falls back to neutral posture when neither voice_posture nor animation_state is provided", async () => {
     mockFetch(makeSuccessResponse());
     renderButton();
     await act(async () => {
@@ -144,7 +144,28 @@ describe("ChatSpeechRenderButton", () => {
     });
     const [, init] = (global.fetch as jest.Mock<typeof fetch>).mock.calls[0];
     const body = JSON.parse((init as RequestInit).body as string);
-    expect(body.posture).toBe("");
+    expect(body.posture).toBe("neutral");
+  });
+
+  test("falls back to neutral posture when both voice_posture and animation_state are empty strings", async () => {
+    mockFetch(makeSuccessResponse());
+    act(() => {
+      root.render(
+        <ChatSpeechRenderButton
+          text="I held the line."
+          voice_posture=""
+          animation_state=""
+          renderEndpoint={TEST_ENDPOINT}
+        />,
+      );
+    });
+    await act(async () => {
+      Simulate.click(container.querySelector("button[aria-label='Render speech']")!);
+      await flush();
+    });
+    const [, init] = (global.fetch as jest.Mock<typeof fetch>).mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.posture).toBe("neutral");
   });
 
   // ── audio control appears only after successful render ────────────────────
@@ -381,6 +402,26 @@ describe("ChatSpeechRenderButton — D5 auto pre-render", () => {
       await flush();
     });
     expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  // ── neutral fallback when metadata missing (autoPreRender) ───────────────
+
+  test("autoPreRender sends posture neutral when no metadata is available", async () => {
+    mockFetch(makeSuccessResponse());
+    await act(async () => {
+      root.render(
+        <ChatSpeechRenderButton
+          text="Hello."
+          renderEndpoint={TEST_ENDPOINT}
+          autoPreRender={true}
+        />,
+      );
+      await flush();
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [, init] = (global.fetch as jest.Mock<typeof fetch>).mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.posture).toBe("neutral");
   });
 
   // ── voice_posture preferred over animation_state ──────────────────────────
