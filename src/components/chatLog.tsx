@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { config } from "@/utils/config";
 import { clsx } from "clsx";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import FlexTextarea from "@/components/flexTextarea/flexTextarea";
@@ -24,6 +25,9 @@ export const ChatLog = ({
   const { t } = useTranslation();
   const { chat: bot } = useContext(ChatContext);
   const { viewer } = useContext(ViewerContext);
+
+  const speechPreRenderEnabled =
+    config("deiphobe_speech_prerender_enabled") === "true";
 
   const handleDispatchCue = viewer?.model
     ? async (voiceMode: string) => {
@@ -145,6 +149,10 @@ export const ChatLog = ({
 
         <div className="max-h-full px-16 pt-20 pb-4 overflow-y-auto scroll-hidden">
           {messages.map((msg, i) => {
+            const autoPreRender =
+              speechPreRenderEnabled &&
+              msg.role === "assistant" &&
+              msg.voice_posture !== "private_memory";
             return (
               <div key={i} ref={messages.length - 1 === i ? chatScrollRef : null}>
                 <Chat
@@ -155,6 +163,7 @@ export const ChatLog = ({
                   voice_posture={msg.voice_posture}
                   animation_state={msg.animation_state}
                   onDispatchCue={handleDispatchCue}
+                  autoPreRender={autoPreRender}
                 />
 
               </div>
@@ -181,6 +190,7 @@ function Chat({
   voice_posture,
   animation_state,
   onDispatchCue,
+  autoPreRender = false,
 }: {
   role: string;
   message: string;
@@ -189,6 +199,7 @@ function Chat({
   voice_posture?: string;
   animation_state?: string;
   onDispatchCue?: (voiceMode: string) => Promise<void>;
+  autoPreRender?: boolean;
 }) {
   const { t } = useTranslation();
   // const [textAreaValue, setTextAreaValue] = useState(message);
@@ -231,7 +242,7 @@ function Chat({
           {role === "assistant" ? (
             <>
               <div>{message}</div>
-              <ChatSpeechRenderButton text={message} voice_posture={voice_posture} animation_state={animation_state} />
+              <ChatSpeechRenderButton text={message} voice_posture={voice_posture} animation_state={animation_state} autoPreRender={autoPreRender} />
               <ChatAvatarCueButton voice_posture={voice_posture} animation_state={animation_state} onDispatchCue={onDispatchCue} />
             </>
           ) : (

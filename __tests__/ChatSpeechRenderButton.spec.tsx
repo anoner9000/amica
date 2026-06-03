@@ -213,3 +213,214 @@ describe("ChatSpeechRenderButton", () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 });
+
+// ── D5: autoPreRender prop ────────────────────────────────────────────────────
+
+describe("ChatSpeechRenderButton — D5 auto pre-render", () => {
+  const originalFetch = global.fetch;
+  const originalActEnvironment = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+
+  beforeEach(() => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    global.fetch = jest.fn() as any;
+  });
+
+  afterEach(() => {
+    act(() => { root.unmount(); });
+    container.remove();
+    global.fetch = originalFetch;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = originalActEnvironment;
+  });
+
+  function renderButton(props: {
+    text?: string;
+    voice_posture?: string;
+    animation_state?: string;
+    autoPreRender?: boolean;
+  } = {}) {
+    act(() => {
+      root.render(
+        <ChatSpeechRenderButton
+          text={props.text ?? "I held the line."}
+          voice_posture={props.voice_posture}
+          animation_state={props.animation_state}
+          renderEndpoint={TEST_ENDPOINT}
+          autoPreRender={props.autoPreRender}
+        />,
+      );
+    });
+  }
+
+  function getAudio(): HTMLAudioElement | null {
+    return container.querySelector("audio");
+  }
+
+  function getError(): string | null {
+    return container.querySelector("p")?.textContent ?? null;
+  }
+
+  // ── setting off → no auto fetch ───────────────────────────────────────────
+
+  test("setting disabled (autoPreRender=false) — no fetch on mount", () => {
+    renderButton({ autoPreRender: false });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("omitting autoPreRender — no fetch on mount (default false)", () => {
+    renderButton();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  // ── setting on → one background render on mount ───────────────────────────
+
+  test("setting enabled (autoPreRender=true) — fetch called once on mount", async () => {
+    mockFetch(makeSuccessResponse());
+    await act(async () => {
+      root.render(
+        <ChatSpeechRenderButton
+          text="I held the line."
+          voice_posture="memory_recall"
+          renderEndpoint={TEST_ENDPOINT}
+          autoPreRender={true}
+        />,
+      );
+      await flush();
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(global.fetch).toHaveBeenCalledWith(
+      TEST_ENDPOINT,
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  // ── no autoplay ───────────────────────────────────────────────────────────
+
+  test("auto-rendered audio has no autoplay attribute", async () => {
+    mockFetch(makeSuccessResponse());
+    await act(async () => {
+      root.render(
+        <ChatSpeechRenderButton
+          text="I held the line."
+          renderEndpoint={TEST_ENDPOINT}
+          autoPreRender={true}
+        />,
+      );
+      await flush();
+    });
+    const audio = getAudio();
+    expect(audio).not.toBeNull();
+    expect(audio?.hasAttribute("autoplay")).toBe(false);
+  });
+
+  // ── no avatar cue dispatch ────────────────────────────────────────────────
+
+  test("auto pre-render fires exactly one fetch — no avatar cue dispatch", async () => {
+    mockFetch(makeSuccessResponse());
+    await act(async () => {
+      root.render(
+        <ChatSpeechRenderButton
+          text="I held the line."
+          renderEndpoint={TEST_ENDPOINT}
+          autoPreRender={true}
+        />,
+      );
+      await flush();
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  // ── bridge failure leaves chat intact ────────────────────────────────────
+
+  test("render bridge failure shows error — no audio, component still mounted", async () => {
+    mockFetch(makeFailureResponse("Piper unavailable"));
+    await act(async () => {
+      root.render(
+        <ChatSpeechRenderButton
+          text="I held the line."
+          renderEndpoint={TEST_ENDPOINT}
+          autoPreRender={true}
+        />,
+      );
+      await flush();
+    });
+    expect(getAudio()).toBeNull();
+    expect(getError()).toContain("Piper unavailable");
+    // Render speech button is still present
+    expect(container.querySelector("button[aria-label='Render speech']")).not.toBeNull();
+  });
+
+  // ── duplicate prevention ──────────────────────────────────────────────────
+
+  test("duplicate renders prevented — re-render does not fire a second fetch", async () => {
+    mockFetch(makeSuccessResponse());
+    await act(async () => {
+      root.render(
+        <ChatSpeechRenderButton
+          text="I held the line."
+          renderEndpoint={TEST_ENDPOINT}
+          autoPreRender={true}
+        />,
+      );
+      await flush();
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    // Re-render with same props (simulates parent re-render)
+    await act(async () => {
+      root.render(
+        <ChatSpeechRenderButton
+          text="I held the line."
+          renderEndpoint={TEST_ENDPOINT}
+          autoPreRender={true}
+        />,
+      );
+      await flush();
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  // ── voice_posture preferred over animation_state ──────────────────────────
+
+  test("voice_posture preferred over animation_state in auto pre-render request", async () => {
+    mockFetch(makeSuccessResponse());
+    await act(async () => {
+      root.render(
+        <ChatSpeechRenderButton
+          text="I held the line."
+          voice_posture="memory_recall"
+          animation_state="warm"
+          renderEndpoint={TEST_ENDPOINT}
+          autoPreRender={true}
+        />,
+      );
+      await flush();
+    });
+    const [, init] = (global.fetch as jest.Mock<typeof fetch>).mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.posture).toBe("memory_recall");
+  });
+
+  // ── animation_state fallback ──────────────────────────────────────────────
+
+  test("animation_state used as fallback when voice_posture absent", async () => {
+    mockFetch(makeSuccessResponse());
+    await act(async () => {
+      root.render(
+        <ChatSpeechRenderButton
+          text="Searching now."
+          animation_state="searching"
+          renderEndpoint={TEST_ENDPOINT}
+          autoPreRender={true}
+        />,
+      );
+      await flush();
+    });
+    const [, init] = (global.fetch as jest.Mock<typeof fetch>).mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.posture).toBe("searching");
+  });
+});

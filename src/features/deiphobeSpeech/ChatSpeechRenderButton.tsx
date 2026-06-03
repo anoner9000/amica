@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 const SPEECH_RENDER_ENDPOINT =
   process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_RENDER_BRIDGE_URL ?? "/debug/deiphobe_speech_render";
@@ -15,15 +15,18 @@ export function ChatSpeechRenderButton({
   voice_posture,
   animation_state,
   renderEndpoint = SPEECH_RENDER_ENDPOINT,
+  autoPreRender = false,
 }: {
   text: string;
   voice_posture?: string;
   animation_state?: string;
   renderEndpoint?: string;
+  autoPreRender?: boolean;
 }) {
   const [isRendering, setIsRendering] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
+  const preRenderFired = useRef(false);
 
   const effectivePosture =
     (voice_posture ?? "").trim() || (animation_state ?? "").trim() || "";
@@ -55,6 +58,13 @@ export function ChatSpeechRenderButton({
       setIsRendering(false);
     }
   }
+
+  useEffect(() => {
+    if (!autoPreRender) return;
+    if (preRenderFired.current) return;
+    preRenderFired.current = true;
+    void handleRender();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="mt-1">

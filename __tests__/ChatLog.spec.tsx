@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import React from "react";
+import type { config as ConfigFn } from "../src/utils/config";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { Simulate } from "react-dom/test-utils";
@@ -28,6 +29,10 @@ jest.mock("../src/components/flexTextarea/flexTextarea", () => ({
 
 jest.mock("../src/utils/chatDisplayName", () => ({
   getAssistantChatDisplayName: () => "Deiphobe",
+}));
+
+jest.mock("../src/utils/config", () => ({
+  config: jest.fn().mockReturnValue("false"),
 }));
 
 jest.mock("../src/features/chat/chatContext", () => {
@@ -357,5 +362,101 @@ describe("ChatLog — avatar cue button (D4)", () => {
     // Cue button is disabled (model not ready) — clicking does nothing
     // No audio element should appear from the cue path
     expect(container.querySelector("audio")).toBeNull();
+  });
+});
+
+// ── D5: setting-gated background pre-render ───────────────────────────────────
+
+describe("ChatLog — D5 setting-gated pre-render", () => {
+  const originalFetch = global.fetch;
+  const originalActEnv = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+
+  function getConfigMock() {
+    return (require("../src/utils/config") as { config: typeof ConfigFn }).config as jest.Mock;
+  }
+
+  beforeEach(async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    global.fetch = jest.fn() as any;
+    getConfigMock().mockReturnValue("false");
+  });
+
+  afterEach(() => {
+    act(() => { root.unmount(); });
+    container.remove();
+    global.fetch = originalFetch;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = originalActEnv;
+  });
+
+  async function renderChatLog(messages: MsgPartial[], prerenderEnabled = false) {
+    getConfigMock().mockReturnValue(prerenderEnabled ? "true" : "false");
+    const { ChatLog } = await import("../src/components/chatLog");
+    await act(async () => {
+      root.render(<ChatLog messages={messages as any} />);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+  }
+
+  // ── setting disabled → no auto fetch ─────────────────────────────────────
+
+  test("setting disabled — no fetch fires on message arrival", async () => {
+    await renderChatLog(
+      [{ role: "assistant", content: "I held the line.", voice_posture: "memory_recall" }],
+      false,
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  // ── setting enabled → one render per assistant message ────────────────────
+
+  test("setting enabled — fetch fires once for assistant message on mount", async () => {
+    (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue({
+      ok: true,
+      json: async () => ({ rendered: true, status: "rendered", audio_url: AUDIO_URL }),
+    } as any);
+    await renderChatLog(
+      [{ role: "assistant", content: "I held the line.", voice_posture: "memory_recall" }],
+      true,
+    );
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  // ── user messages never pre-render ────────────────────────────────────────
+
+  test("setting enabled — user messages do not trigger pre-render", async () => {
+    await renderChatLog(
+      [{ role: "user", content: "Hello there." }],
+      true,
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  // ── private_memory is not pre-rendered ───────────────────────────────────
+
+  test("setting enabled — private_memory messages are not pre-rendered", async () => {
+    await renderChatLog(
+      [{ role: "assistant", content: "This stays private.", voice_posture: "private_memory" }],
+      true,
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  // ── no avatar cue from pre-render ─────────────────────────────────────────
+
+  test("pre-render does not dispatch avatar cue — fetch called exactly once", async () => {
+    (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue({
+      ok: true,
+      json: async () => ({ rendered: true, status: "rendered", audio_url: AUDIO_URL }),
+    } as any);
+    await renderChatLog(
+      [{ role: "assistant", content: "I held the line.", voice_posture: "memory_recall" }],
+      true,
+    );
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 });

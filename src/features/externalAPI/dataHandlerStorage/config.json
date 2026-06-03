@@ -92,6 +92,7 @@
   "speecht5_speaker_embedding_url": "/speecht5_speaker_embeddings/cmu_us_slt_arctic-wav-arctic_a0001.bin",
   "coqui_apikey": "",
   "coqui_voice_id": "71c6c3eb-98ca-4a05-8d6b-f8c2b5f9f3a3",
+  "deiphobe_speech_prerender_enabled": "false",
   "amica_life_enabled": "true",
   "reasoning_engine_enabled": "false",
   "reasoning_engine_url": "https://i-love-amica.com:3000/reasoning/v1/chat/completions",
