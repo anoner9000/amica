@@ -25,7 +25,7 @@ export const triggerAmicaActions = async (payload: any) => {
     const message = reprocess
       ? await askLLM(config("system_prompt"), text, null)
       : text;
-    await handleSocialMediaActions(message, resolvedSocialMedia);
+    await handleSocialMediaActions(message, resolvedSocialMedia, { voice_posture, animation_state });
   }
 
   const selectedAnimationState = selectAnimationStateFromPayload({

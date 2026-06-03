@@ -136,6 +136,8 @@ export const ChatLog = ({
                   message={(msg.content as string).replace(/\[(.*?)\]/g, "")}
                   num={i}
                   onClickResumeButton={handleResumeButtonClick}
+                  voice_posture={msg.voice_posture}
+                  animation_state={msg.animation_state}
                 />
 
               </div>
@@ -158,12 +160,16 @@ function Chat({
   role,
   message,
   num,
-  onClickResumeButton
+  onClickResumeButton,
+  voice_posture,
+  animation_state,
 }: {
   role: string;
   message: string;
   num: number;
   onClickResumeButton: (num: number, message: string) => void;
+  voice_posture?: string;
+  animation_state?: string;
 }) {
   const { t } = useTranslation();
   // const [textAreaValue, setTextAreaValue] = useState(message);
@@ -206,7 +212,7 @@ function Chat({
           {role === "assistant" ? (
             <>
               <div>{message}</div>
-              <ChatSpeechRenderButton text={message} />
+              <ChatSpeechRenderButton text={message} voice_posture={voice_posture} animation_state={animation_state} />
             </>
           ) : (
             <FlexTextarea

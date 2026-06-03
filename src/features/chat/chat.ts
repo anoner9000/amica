@@ -102,6 +102,8 @@ export class Chat {
 
   public messageList: Message[];
 
+  private pendingMessageMeta: { voice_posture?: string; animation_state?: string };
+
   public currentStreamIdx: number;
 
   private eventSource: EventSource | null = null
@@ -122,6 +124,7 @@ export class Chat {
     this.thoughtMessage = "";
 
     this.messageList = [];
+    this.pendingMessageMeta = {};
     this.currentStreamIdx = 0;
 
     this.lastAwake = 0;
@@ -306,7 +309,9 @@ export class Chat {
         this.messageList!.push({
           role: "assistant",
           content: this.currentAssistantMessage,
+          ...this.pendingMessageMeta,
         });
+        this.pendingMessageMeta = {};
 
         this.currentAssistantMessage = "";
       }
@@ -326,7 +331,9 @@ export class Chat {
         this.messageList!.push({
           role: "assistant",
           content: this.currentAssistantMessage,
+          ...this.pendingMessageMeta,
         });
+        this.pendingMessageMeta = {};
 
         this.currentAssistantMessage = text;
         this.setAssistantMessage!(this.currentAssistantMessage);
@@ -335,7 +342,9 @@ export class Chat {
           this.messageList!.push({
             role: "assistant",
             content: this.currentAssistantMessage,
+            ...this.pendingMessageMeta,
           });
+          this.pendingMessageMeta = {};
         }
         this.currentAssistantMessage = text;
         this.setAssistantMessage!(this.currentAssistantMessage);
@@ -358,7 +367,7 @@ export class Chat {
 
       this.setChatLog!([
         ...this.messageList!,
-        { role: "assistant", content: this.currentAssistantMessage },
+        { role: "assistant", content: this.currentAssistantMessage, ...this.pendingMessageMeta },
       ]);
     }
 
@@ -451,17 +460,23 @@ export class Chat {
 
         // Handle the message based on its type
         switch (type) {
-          case 'normal':
-            console.log('Normal message received:', data);
+          case 'normal': {
+            const normalText = typeof data === "string" ? data : (data?.text ?? "");
+            this.pendingMessageMeta = typeof data === "object" && data !== null ? {
+              voice_posture: data.voice_posture || undefined,
+              animation_state: data.animation_state || undefined,
+            } : {};
+            console.log('Normal message received:', normalText);
             const messages: Message[] = [
               { role: "system", content: config("system_prompt") },
               ...this.messageList!,
-              { role: "user", content: data},
+              { role: "user", content: normalText },
             ];
-            let stream = await getEchoChatResponseStream(messages);
+            const stream = await getEchoChatResponseStream(messages);
             this.streams.push(stream);
             this.handleChatResponseStream();
             break;
+          }
           
           case 'animation':
             console.log('Animation data received:', data);

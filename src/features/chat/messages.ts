@@ -4,6 +4,8 @@ export type Role = "assistant" | "system" | "user";
 export type Message = {
   role: Role;
   content: string; // this can be a string or like {type: "image", image_url: {url: "https://example.com/image.jpg"} } but the typing for it sucks
+  voice_posture?: string;
+  animation_state?: string;
 };
 
 const talkStyles = [
