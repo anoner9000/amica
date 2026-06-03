@@ -43,6 +43,23 @@ jest.mock("../src/features/chat/chatContext", () => {
   };
 });
 
+jest.mock("../src/features/vrmViewer/viewerContext", () => {
+  const { createContext } = require("react");
+  return {
+    ViewerContext: createContext({ viewer: { model: undefined, resetCameraLerp: () => {} } }),
+  };
+});
+
+jest.mock("../src/features/vrmViewer/animationState", () => ({
+  resolveAnimationStatePath: jest.fn<() => Promise<string>>().mockResolvedValue("/animations/Relax.vrma"),
+  selectAnimationStateFromExpression: jest.fn().mockReturnValue(null),
+  selectAnimationStateFromPayload: jest.fn().mockReturnValue(null),
+}));
+
+jest.mock("../src/lib/VRMAnimation/loadVRMAnimation", () => ({
+  loadVRMAnimation: jest.fn().mockResolvedValue({}),
+}));
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 const TEST_ENDPOINT = "/debug/deiphobe_speech_render";
@@ -237,5 +254,108 @@ describe("ChatLog — voice_posture plumbing", () => {
       { role: "user", content: "Hello there." },
     ]);
     expect(getRenderButton()).toBeNull();
+  });
+});
+
+// ── D4: avatar cue button in ChatLog ─────────────────────────────────────────
+
+describe("ChatLog — avatar cue button (D4)", () => {
+  const originalFetch = global.fetch;
+  const originalActEnv = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+
+  beforeEach(async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    global.fetch = jest.fn() as any;
+  });
+
+  afterEach(() => {
+    act(() => { root.unmount(); });
+    container.remove();
+    global.fetch = originalFetch;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = originalActEnv;
+  });
+
+  async function renderChatLog(messages: MsgPartial[]) {
+    const { ChatLog } = await import("../src/components/chatLog");
+    await act(async () => {
+      root.render(<ChatLog messages={messages as any} />);
+    });
+  }
+
+  function getCueButton(): HTMLButtonElement | null {
+    return container.querySelector("button[aria-label='Cue avatar']");
+  }
+
+  function getRenderButton(): HTMLButtonElement | null {
+    return container.querySelector("button[aria-label='Render speech']");
+  }
+
+  // ── cue button present for assistant, absent for user ─────────────────────
+
+  test("assistant messages show a cue avatar button", async () => {
+    await renderChatLog([{ role: "assistant", content: "I held the line." }]);
+    expect(getCueButton()).not.toBeNull();
+  });
+
+  test("user messages do not show a cue avatar button", async () => {
+    await renderChatLog([{ role: "user", content: "Hello there." }]);
+    expect(getCueButton()).toBeNull();
+  });
+
+  // ── model not ready when viewer.model is undefined ────────────────────────
+
+  test("cue button is disabled when model is not ready (viewer.model is undefined in mock)", async () => {
+    await renderChatLog([
+      { role: "assistant", content: "I held the line.", voice_posture: "memory_recall" },
+    ]);
+    const btn = getCueButton();
+    expect(btn).not.toBeNull();
+    expect(btn?.disabled).toBe(true);
+  });
+
+  // ── no cue dispatch on mount ──────────────────────────────────────────────
+
+  test("no cue dispatch on initial render", async () => {
+    await renderChatLog([
+      { role: "assistant", content: "I held the line.", voice_posture: "memory_recall" },
+    ]);
+    // viewer.model is undefined in mock → handler is undefined → button disabled, no dispatch
+    expect(getCueButton()?.disabled).toBe(true);
+  });
+
+  // ── render speech button does not dispatch avatar cue ─────────────────────
+
+  test("clicking render speech button does not interact with cue button", async () => {
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ rendered: true, status: "rendered", audio_url: AUDIO_URL }),
+    } as any);
+    await renderChatLog([
+      { role: "assistant", content: "I held the line.", voice_posture: "memory_recall" },
+    ]);
+    await act(async () => {
+      Simulate.click(getRenderButton()!);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // Cue button remains disabled — model not ready, no cue dispatched
+    expect(getCueButton()?.disabled).toBe(true);
+    // Only one fetch call (the render, not a cue)
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  // ── no autoplay from cue button ───────────────────────────────────────────
+
+  test("no audio element created by the cue avatar button", async () => {
+    await renderChatLog([
+      { role: "assistant", content: "I held the line.", voice_posture: "memory_recall" },
+    ]);
+    // Cue button is disabled (model not ready) — clicking does nothing
+    // No audio element should appear from the cue path
+    expect(container.querySelector("audio")).toBeNull();
   });
 });

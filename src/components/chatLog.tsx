@@ -4,6 +4,10 @@ import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import FlexTextarea from "@/components/flexTextarea/flexTextarea";
 import { Message } from "@/features/chat/messages";
 import { ChatSpeechRenderButton } from "@/features/deiphobeSpeech/ChatSpeechRenderButton";
+import { ChatAvatarCueButton } from "@/features/deiphobeSpeech/ChatAvatarCueButton";
+import { ViewerContext } from "@/features/vrmViewer/viewerContext";
+import { resolveAnimationStatePath } from "@/features/vrmViewer/animationState";
+import { loadVRMAnimation } from "@/lib/VRMAnimation/loadVRMAnimation";
 import { IconButton } from "@/components/iconButton";
 import {
   ArrowPathIcon,
@@ -19,6 +23,18 @@ export const ChatLog = ({
 }) => {
   const { t } = useTranslation();
   const { chat: bot } = useContext(ChatContext);
+  const { viewer } = useContext(ViewerContext);
+
+  const handleDispatchCue = viewer?.model
+    ? async (voiceMode: string) => {
+        const pathName = await resolveAnimationStatePath(voiceMode);
+        if (!pathName) throw new Error(`No animation mapping for "${voiceMode}"`);
+        const animation = await loadVRMAnimation(pathName);
+        if (!animation) throw new Error("Failed to load animation");
+        await viewer.model!.playAnimation(animation, pathName.split("/").pop() || pathName);
+        requestAnimationFrame(() => { viewer.resetCameraLerp(); });
+      }
+    : undefined;
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const handleResumeButtonClick = (num: number, newMessage: string) => {
@@ -138,6 +154,7 @@ export const ChatLog = ({
                   onClickResumeButton={handleResumeButtonClick}
                   voice_posture={msg.voice_posture}
                   animation_state={msg.animation_state}
+                  onDispatchCue={handleDispatchCue}
                 />
 
               </div>
@@ -163,6 +180,7 @@ function Chat({
   onClickResumeButton,
   voice_posture,
   animation_state,
+  onDispatchCue,
 }: {
   role: string;
   message: string;
@@ -170,6 +188,7 @@ function Chat({
   onClickResumeButton: (num: number, message: string) => void;
   voice_posture?: string;
   animation_state?: string;
+  onDispatchCue?: (voiceMode: string) => Promise<void>;
 }) {
   const { t } = useTranslation();
   // const [textAreaValue, setTextAreaValue] = useState(message);
@@ -213,6 +232,7 @@ function Chat({
             <>
               <div>{message}</div>
               <ChatSpeechRenderButton text={message} voice_posture={voice_posture} animation_state={animation_state} />
+              <ChatAvatarCueButton voice_posture={voice_posture} animation_state={animation_state} onDispatchCue={onDispatchCue} />
             </>
           ) : (
             <FlexTextarea
