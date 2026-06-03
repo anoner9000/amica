@@ -17,6 +17,7 @@ export const triggerAmicaActions = async (payload: any) => {
     reprocess,
     animation,
     animation_state,
+    voice_posture,
   } = payload;
   const resolvedSocialMedia = socialMedia ?? "none";
 
@@ -29,6 +30,7 @@ export const triggerAmicaActions = async (payload: any) => {
 
   const selectedAnimationState = selectAnimationStateFromPayload({
     animation_state,
+    voice_posture,
   });
 
   if (selectedAnimationState) {

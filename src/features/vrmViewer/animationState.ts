@@ -99,6 +99,16 @@ export function selectAnimationStateFromExpression(
 }
 
 export function selectAnimationStateFromPayload(payload: any): string | null {
+  // Prefer voice_posture (delivery-only metadata) when present — it is more
+  // precise than animation_state for speech/avatar cue selection.
+  const voicePosture =
+    typeof payload?.voice_posture === "string"
+      ? payload.voice_posture.trim().toLowerCase()
+      : "";
+  if (voicePosture) {
+    return voicePosture;
+  }
+
   const explicitState =
     typeof payload?.animation_state === "string"
       ? payload.animation_state.trim().toLowerCase()

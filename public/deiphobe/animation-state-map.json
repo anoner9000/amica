@@ -21,5 +21,16 @@
   "careful": "/animations/Thinking.vrma",
   "careful_confirming": "/animations/Thinking.vrma",
   "playful": "/animations/Jump.vrma",
-  "quiet_private": "/animations/Sleepy.vrma"
+  "quiet_private": "/animations/Sleepy.vrma",
+  "operational_troubleshooting": "/animations/LookAround.vrma",
+  "governed_system_fact": "/animations/Relax.vrma",
+  "bounded_reflection": "/animations/Thinking.vrma",
+  "social_continuity": "/animations/Blush.vrma",
+  "conversation_recency": "/animations/Relax.vrma",
+  "memory_recall": "/animations/Thinking.vrma",
+  "memory_write": "/animations/Relax.vrma",
+  "creative_chat": "/animations/Jump.vrma",
+  "ordinary_chat": "/animations/Relax.vrma",
+  "private_memory": "/animations/Sleepy.vrma",
+  "neutral": "/animations/Relax.vrma"
 }
