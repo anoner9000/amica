@@ -66,6 +66,7 @@
 
 * [Creating new Avatars](./tutorials/creating-new-avatars.md)
 * [Using Custom Assets](./tutorials/using-custom-assets.md)
+* [Amica Unity Avatar Conversion Lane](../project-resources/amica-unity-avatar-conversion-lane.md)
 
 ## 🌺 Contributing to Amica
 

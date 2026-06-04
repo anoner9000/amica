@@ -4,6 +4,10 @@ title: Local Animation Library
 
 This workflow is for adding third-party `.vrma` animations to Amica without changing Deiphobe, Piper, Matrix, or any runtime service.
 
+If you are starting from a UnityPackage, FBX bundle, or avatar pack with mixed asset types, use the Unity conversion lane first:
+
+- [Amica Unity Avatar Conversion Lane](../project-resources/amica-unity-avatar-conversion-lane.md)
+
 ## Where To Put Animations
 
 Put `.vrma` files in:
@@ -116,6 +120,15 @@ That will:
 - preserve a safe filename
 - refresh `src/paths.ts`
 - print a ready-to-run one-shot curl payload
+
+For a broader asset inspection pass over a downloaded library, use:
+
+```bash
+cd ~/ClawDawg/amica
+scripts/inspect_avatar_assets.sh "/mnt/c/Users/Skyler/Documents/VR Assets/Animations"
+```
+
+That helper prints counts and categories so you can tell whether you have direct Amica animations, likely conversion inputs, or Unity-only supporting files.
 
 ## Local Dev Server Port Note
 
