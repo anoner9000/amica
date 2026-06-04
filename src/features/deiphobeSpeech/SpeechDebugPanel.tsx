@@ -114,9 +114,9 @@ export function SpeechDebugPanel({
   onResolveAnimationPath?: (voiceMode: string) => Promise<string>;
 }) {
   const [currentPayload, setCurrentPayload] = useState<SpeechDebugPayload>(payload);
-  const [requestText, setRequestText] = useState(payload.visible_text);
-  const [requestPosture, setRequestPosture] = useState(payload.speech_plan.posture);
-  const [requestOperatorName, setRequestOperatorName] = useState("");
+  const [requestText, setRequestText] = useState<string>(payload.visible_text);
+  const [requestPosture, setRequestPosture] = useState<string>(payload.speech_plan.posture);
+  const [requestOperatorName, setRequestOperatorName] = useState<string>("");
   const [requestPrivateMode, setRequestPrivateMode] = useState(false);
   const [requestIncludeRenderRequest, setRequestIncludeRenderRequest] = useState(true);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
