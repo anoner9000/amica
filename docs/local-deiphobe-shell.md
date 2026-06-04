@@ -35,6 +35,12 @@ cd ~/ClawDawg/amica
 bash scripts/start_deiphobe_shell.sh
 ```
 
+VoiceDesign-aware local startup:
+```bash
+cd ~/ClawDawg/amica
+bash scripts/start_deiphobe_voice_dev.sh
+```
+
 What it does:
 - Checks `http://127.0.0.1:5000/health`
 - Starts the Piper shim on `http://127.0.0.1:5000` if needed
@@ -43,6 +49,12 @@ What it does:
 - Prints the browser URL: `http://localhost:3000`
 - Leaves an existing Piper service alone
 - Does not kill unrelated processes on port `5000`
+
+The VoiceDesign-aware helper additionally:
+- Ensures the local VoiceDesign server on `127.0.0.1:8771` is running through `ops/scripts/deiphobe/qwen3_voicedesign_control.sh`
+- Checks the local bridge health on `127.0.0.1:8766`
+- Verifies the expected Deiphobe bridge URLs are present in `.env.local`
+- Starts Amica with `npm run dev:deiphobe`
 
 ## Piper Commands
 
