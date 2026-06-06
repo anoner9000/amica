@@ -540,7 +540,7 @@ export class Chat {
     this.eventSource.onerror = (error) => {
       console.error('Error in SSE connection:', error);
       this.eventSource?.close();
-      setTimeout(this.initSSE, 500);
+      setTimeout(() => this.initSSE(), 500);
     };
   }
 
