@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from "react";
-import isDev from "@/utils/isDev";
 import {
   callSpeechRenderBridge,
   makeUniqueSpeechOutputFilename,
@@ -124,22 +123,34 @@ export function ChatSpeechRenderButton({
       >
         {isRendering ? "Rendering\u2026" : "\uD83D\uDD0A Render speech"}
       </button>
+      {renderResult === null && renderError !== null && (
+        <div className="mt-1 text-[10px] text-orange-600">
+          Speech bridge unavailable — check bridge at {renderEndpoint}
+        </div>
+      )}
       {renderError !== null && (
         <p className="mt-1 text-xs text-red-500">{renderError}</p>
       )}
       {playbackStatus !== null && (
         <p className="mt-1 text-xs text-amber-600">{playbackStatus}</p>
       )}
-      {isDev && renderResult !== null && (
+      {playbackStatus !== null && playbackStatus.includes("blocked") && audioUrl !== null && (
+        <button
+          type="button"
+          onClick={() => { void audioRef.current?.play(); }}
+          className="mt-1 text-xs text-blue-600 hover:text-blue-800"
+        >
+          ▶ Play voice
+        </button>
+      )}
+      {renderResult !== null && (
         <div className="mt-1 text-[10px] leading-4 text-gray-500">
-          <div>render_url: {renderEndpoint}</div>
-          <div>engine: {renderResult.render_engine ?? "n/a"}</div>
-          <div>rendered: {String(renderResult.rendered)}</div>
-          <div>status: {renderResult.status}</div>
-          <div>audio_url: {renderResult.audio_url ?? "n/a"}</div>
-          <div>error: {renderResult.error ?? "none"}</div>
-          <div>autoplay_enabled: {String(autoPlayAfterRender)}</div>
-          <div>muted: {String(isMuted)} volume: {Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.6}</div>
+          <div>bridge: {renderEndpoint}</div>
+          <div>engine: {renderResult.render_engine ?? "n/a"} | rendered: {String(renderResult.rendered)} | status: {renderResult.status}</div>
+          <div>audio_url: {renderResult.audio_url ? "present" : "missing"} | bytes: {renderResult.bytes_received ?? "n/a"}</div>
+          {renderResult.error ? <div>error: {renderResult.error}</div> : null}
+          <div>autoplay: {String(autoPlayAfterRender)} | muted: {String(isMuted)} | vol: {Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.6}</div>
+          {playbackStatus ? <div>play_state: {playbackStatus}</div> : null}
         </div>
       )}
       {audioUrl !== null && (
