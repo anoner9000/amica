@@ -14,6 +14,12 @@ jest.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
+jest.mock("../src/features/deiphobeSpeech/smartChunkSpeech", () => ({
+  callSmartChunkRender: jest.fn(),
+  playSmartChunks: jest.fn(),
+  stopSmartChunkPlayback: jest.fn(),
+}));
+
 jest.mock("file-saver", () => ({ saveAs: jest.fn() }));
 
 jest.mock("../src/components/iconButton", () => ({
@@ -606,5 +612,333 @@ describe("ChatLog — D5 setting-gated pre-render", () => {
     );
     expect(playMock).not.toHaveBeenCalled();
     expect(getAudio()).toBeNull();
+  });
+});
+
+// ── D6: smart-chunk autoplay ──────────────────────────────────────────────────
+
+describe("ChatLog — D6 smart-chunk autoplay", () => {
+  const originalActEnv = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+
+  // Typed accessors for the mocked smartChunkSpeech module.
+  function getSmartMocks() {
+    const mod = require("../src/features/deiphobeSpeech/smartChunkSpeech") as {
+      callSmartChunkRender: jest.Mock;
+      playSmartChunks: jest.Mock;
+      stopSmartChunkPlayback: jest.Mock;
+    };
+    return mod;
+  }
+
+  function getConfigMock() {
+    return (require("../src/utils/config") as { config: typeof ConfigFn }).config as jest.Mock;
+  }
+
+  function setSmartConfig(autoRender = false, autoPlay = false) {
+    getConfigMock().mockImplementation((key: string) => {
+      // Manual chat controls remain hidden in D6 tests.
+      if (key === "deiphobe_speech_chat_controls_enabled") return "false";
+      if (key === "deiphobe_speech_auto_render_enabled") return autoRender ? "true" : "false";
+      if (key === "deiphobe_speech_auto_play_enabled") return autoPlay ? "true" : "false";
+      if (key === "deiphobe_speech_smart_chunks_enabled") return "true";
+      return "false";
+    });
+  }
+
+  beforeEach(() => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    setSmartConfig(false, false);
+    // Reset mocks between tests.
+    const { callSmartChunkRender, playSmartChunks, stopSmartChunkPlayback } = getSmartMocks();
+    callSmartChunkRender.mockReset();
+    playSmartChunks.mockReset();
+    stopSmartChunkPlayback.mockReset();
+  });
+
+  afterEach(() => {
+    act(() => { root.unmount(); });
+    container.remove();
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = originalActEnv;
+  });
+
+  async function renderChatLog(messages: MsgPartial[], autoRender = false, autoPlay = false) {
+    setSmartConfig(autoRender, autoPlay);
+    const { ChatLog } = await import("../src/components/chatLog");
+    await act(async () => {
+      root.render(<ChatLog messages={messages as any} />);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+  }
+
+  const CHUNK_URLS = ["http://127.0.0.1:8771/audio/smart-00.wav", "http://127.0.0.1:8771/audio/smart-01.wav"];
+
+  function mockRenderSuccess() {
+    getSmartMocks().callSmartChunkRender.mockResolvedValueOnce({
+      ok: true,
+      audioUrls: CHUNK_URLS,
+      chunkCount: CHUNK_URLS.length,
+    });
+  }
+
+  function mockRenderFailure(error = "Server unavailable") {
+    getSmartMocks().callSmartChunkRender.mockResolvedValueOnce({
+      ok: false,
+      audioUrls: [],
+      chunkCount: 0,
+      error,
+    });
+  }
+
+  function mockPlayCompletes() {
+    getSmartMocks().playSmartChunks.mockImplementation(
+      async (_urls: string[], onStatus: (s: string) => void) => {
+        onStatus("playing");
+        onStatus("complete");
+      },
+    );
+  }
+
+  function getStatusText(): string | null {
+    return container.querySelector("[aria-live='polite']")?.textContent ?? null;
+  }
+
+  function getStopButton(): HTMLButtonElement | null {
+    return container.querySelector("button[aria-label='Stop voice']");
+  }
+
+  function getRenderButton(): HTMLButtonElement | null {
+    return container.querySelector("button[aria-label='Render speech']");
+  }
+
+  // ── auto-render disabled → no fetch ──────────────────────────────────────
+
+  test("auto-render disabled — callSmartChunkRender does not fire on mount", async () => {
+    await renderChatLog(
+      [{ role: "assistant", content: "I held the line.", voice_posture: "memory_recall" }],
+      false,
+    );
+    expect(getSmartMocks().callSmartChunkRender).not.toHaveBeenCalled();
+  });
+
+  // ── auto-render enabled → fetch fires once ────────────────────────────────
+
+  test("auto-render enabled — callSmartChunkRender fires once for newest assistant message", async () => {
+    mockRenderSuccess();
+    await renderChatLog(
+      [{ role: "assistant", content: "I held the line.", voice_posture: "memory_recall" }],
+      true,
+    );
+    expect(getSmartMocks().callSmartChunkRender).toHaveBeenCalledTimes(1);
+    expect(getSmartMocks().callSmartChunkRender).toHaveBeenCalledWith("I held the line.");
+  });
+
+  // ── auto-play disabled → play not called ─────────────────────────────────
+
+  test("auto-play disabled — playSmartChunks not called even after successful render", async () => {
+    mockRenderSuccess();
+    await renderChatLog(
+      [{ role: "assistant", content: "I held the line.", voice_posture: "memory_recall" }],
+      true,
+      false,
+    );
+    expect(getSmartMocks().callSmartChunkRender).toHaveBeenCalledTimes(1);
+    expect(getSmartMocks().playSmartChunks).not.toHaveBeenCalled();
+  });
+
+  // ── auto-play enabled → play fires after render ───────────────────────────
+
+  test("auto-play enabled — playSmartChunks called after successful render", async () => {
+    mockRenderSuccess();
+    mockPlayCompletes();
+    await renderChatLog(
+      [{ role: "assistant", content: "I held the line.", voice_posture: "memory_recall" }],
+      true,
+      true,
+    );
+    expect(getSmartMocks().callSmartChunkRender).toHaveBeenCalledTimes(1);
+    expect(getSmartMocks().playSmartChunks).toHaveBeenCalledTimes(1);
+    expect(getSmartMocks().playSmartChunks).toHaveBeenCalledWith(CHUNK_URLS, expect.any(Function));
+  });
+
+  // ── private_memory excluded ───────────────────────────────────────────────
+
+  test("private_memory — callSmartChunkRender does not fire", async () => {
+    await renderChatLog(
+      [{ role: "assistant", content: "This stays private.", voice_posture: "private_memory" }],
+      true,
+      true,
+    );
+    expect(getSmartMocks().callSmartChunkRender).not.toHaveBeenCalled();
+    expect(getSmartMocks().playSmartChunks).not.toHaveBeenCalled();
+  });
+
+  // ── user messages excluded ────────────────────────────────────────────────
+
+  test("user messages — callSmartChunkRender does not fire", async () => {
+    await renderChatLog(
+      [{ role: "user", content: "Hello there." }],
+      true,
+      true,
+    );
+    expect(getSmartMocks().callSmartChunkRender).not.toHaveBeenCalled();
+    expect(getSmartMocks().playSmartChunks).not.toHaveBeenCalled();
+  });
+
+  // ── new assistant message cancels previous ────────────────────────────────
+
+  test("new assistant message arrival calls stopSmartChunkPlayback on the previous message", async () => {
+    // First message: render hangs on play (never completes) so it stays in "playing" state.
+    mockRenderSuccess();
+    getSmartMocks().playSmartChunks.mockImplementation(
+      async (_urls: string[], onStatus: (s: string) => void) => {
+        onStatus("playing");
+        // never resolves — simulates ongoing playback
+        await new Promise(() => {});
+      },
+    );
+    const msgA: MsgPartial = { role: "assistant", content: "First reply.", voice_posture: "neutral" };
+    const msgB: MsgPartial = { role: "assistant", content: "Second reply.", voice_posture: "neutral" };
+
+    setSmartConfig(true, true);
+    const { ChatLog } = await import("../src/components/chatLog");
+
+    // Render with only msgA — it becomes the newest, fires render+play.
+    await act(async () => {
+      root.render(<ChatLog messages={[msgA] as any} />);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(getSmartMocks().callSmartChunkRender).toHaveBeenCalledTimes(1);
+
+    const stopMock = getSmartMocks().stopSmartChunkPlayback;
+    stopMock.mockReset();
+
+    // Add msgB — msgA loses "newest" status, msgB becomes newest.
+    // Mock render for msgB so it doesn't throw.
+    getSmartMocks().callSmartChunkRender.mockResolvedValueOnce({
+      ok: true, audioUrls: [], chunkCount: 0,
+    });
+    await act(async () => {
+      root.render(<ChatLog messages={[msgA, msgB] as any} />);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    // stopSmartChunkPlayback must have been called when msgA lost newest status.
+    expect(stopMock).toHaveBeenCalled();
+  });
+
+  // ── stop button visible while playing ────────────────────────────────────
+
+  test("stop button is visible while Speaking and absent otherwise", async () => {
+    mockRenderSuccess();
+    // Play hangs so we can inspect the "playing" state.
+    let resolvePlay: () => void;
+    getSmartMocks().playSmartChunks.mockImplementation(
+      async (_urls: string[], onStatus: (s: string) => void) => {
+        onStatus("playing");
+        await new Promise<void>((r) => { resolvePlay = r; });
+        onStatus("complete");
+      },
+    );
+    await renderChatLog(
+      [{ role: "assistant", content: "I held the line.", voice_posture: "memory_recall" }],
+      true,
+      true,
+    );
+    // Status should be "playing" → stop button visible.
+    expect(getStopButton()).not.toBeNull();
+    expect(getStatusText()).toContain("Speaking");
+
+    // Resolve play → status transitions to "complete", stop button disappears.
+    await act(async () => {
+      resolvePlay!();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(getStopButton()).toBeNull();
+    expect(getStatusText()).toContain("Voice complete");
+  });
+
+  // ── stop button cancels playback ──────────────────────────────────────────
+
+  test("clicking stop button calls stopSmartChunkPlayback and returns to Voice ready", async () => {
+    mockRenderSuccess();
+    let resolvePlay: () => void;
+    getSmartMocks().playSmartChunks.mockImplementation(
+      async (_urls: string[], onStatus: (s: string) => void) => {
+        onStatus("playing");
+        await new Promise<void>((r) => { resolvePlay = r; });
+      },
+    );
+    await renderChatLog(
+      [{ role: "assistant", content: "I held the line.", voice_posture: "memory_recall" }],
+      true,
+      true,
+    );
+    const stopBtn = getStopButton();
+    expect(stopBtn).not.toBeNull();
+
+    const stopMock = getSmartMocks().stopSmartChunkPlayback;
+    stopMock.mockReset();
+
+    await act(async () => {
+      Simulate.click(stopBtn!);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(stopMock).toHaveBeenCalled();
+    expect(getStatusText()).toContain("Voice ready");
+    expect(getStopButton()).toBeNull();
+
+    resolvePlay!(); // cleanup hanging promise
+  });
+
+  // ── failed render does not mutate text ───────────────────────────────────
+
+  test("failed render shows Voice unavailable and leaves message text unchanged", async () => {
+    mockRenderFailure("Server unavailable");
+    const content = "I held the line.";
+    await renderChatLog(
+      [{ role: "assistant", content, voice_posture: "memory_recall" }],
+      true,
+    );
+    // Text unchanged.
+    expect(container.textContent).toContain(content);
+    // Status shows error.
+    expect(getStatusText()).toContain("Voice unavailable");
+    // No play attempted.
+    expect(getSmartMocks().playSmartChunks).not.toHaveBeenCalled();
+  });
+
+  // ── manual controls remain hidden ─────────────────────────────────────────
+
+  test("manual render/cue buttons remain hidden when only smart-chunk config is enabled", async () => {
+    mockRenderSuccess();
+    await renderChatLog(
+      [{ role: "assistant", content: "I held the line.", voice_posture: "memory_recall" }],
+      true,
+      true,
+    );
+    // deiphobe_speech_chat_controls_enabled is "false" in D6 config helper.
+    expect(getRenderButton()).toBeNull();
+    expect(container.querySelector("button[aria-label='Cue avatar']")).toBeNull();
+  });
+
+  // ── only newest assistant message renders ─────────────────────────────────
+
+  test("with two assistant messages only the newest triggers callSmartChunkRender", async () => {
+    // Provide two return values: one for the newest message only.
+    getSmartMocks().callSmartChunkRender.mockResolvedValue({
+      ok: true, audioUrls: [], chunkCount: 0,
+    });
+    const msgA: MsgPartial = { role: "assistant", content: "First reply.", voice_posture: "neutral" };
+    const msgB: MsgPartial = { role: "assistant", content: "Second reply.", voice_posture: "neutral" };
+    await renderChatLog([msgA, msgB], true);
+    // Only one render call — for the newest (msgB).
+    expect(getSmartMocks().callSmartChunkRender).toHaveBeenCalledTimes(1);
+    expect(getSmartMocks().callSmartChunkRender).toHaveBeenCalledWith("Second reply.");
   });
 });

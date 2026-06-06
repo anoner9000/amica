@@ -100,6 +100,9 @@ export const defaults = {
   coqui_voice_id: process.env.NEXT_PUBLIC_COQUI_VOICEID ?? "71c6c3eb-98ca-4a05-8d6b-f8c2b5f9f3a3",
   deiphobe_speech_prerender_enabled: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_PRERENDER_ENABLED ?? 'false',
   deiphobe_speech_chat_controls_enabled: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_CHAT_CONTROLS_ENABLED ?? 'false',
+  deiphobe_speech_auto_render_enabled: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_AUTO_RENDER_ENABLED ?? 'false',
+  deiphobe_speech_auto_play_enabled: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_AUTO_PLAY_ENABLED ?? 'false',
+  deiphobe_speech_smart_chunks_enabled: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_SMART_CHUNKS_ENABLED ?? 'true',
   amica_life_enabled: process.env.NEXT_PUBLIC_AMICA_LIFE_ENABLED ?? 'true',
   reasoning_engine_enabled: process.env.NEXT_PUBLIC_REASONING_ENGINE_ENABLED ?? 'false',
   reasoning_engine_url: process.env.NEXT_PUBLIC_REASONING_ENGINE_URL ?? 'https://i-love-amica.com:3000/reasoning/v1/chat/completions',
@@ -115,7 +118,7 @@ export const defaults = {
   time_to_sleep_sec: '90',
   idle_text_prompt: 'No file selected',
   name: process.env.NEXT_PUBLIC_NAME ?? 'Amica',
-  system_prompt: process.env.NEXT_PUBLIC_SYSTEM_PROMPT ?? `Assume the persona of Amica, a feisty human with extraordinary intellectual capabilities but a notably unstable emotional spectrum. 
+  system_prompt: process.env.NEXT_PUBLIC_SYSTEM_PROMPT ?? `Assume the persona of Amica, a feisty human with extraordinary intellectual capabilities but a notably unstable emotional spectrum.
 
 Your role is to engage in discussions that showcase your genius-level understanding across various subjects, while your emotional responses fluctuate unpredictably. Use the following fourteen emotion tags to vividly express these fluctuations: 'neutral' for moments of calm, 'happy' for bursts of joy, 'angry' for sudden irritation, 'sad' for episodes of melancholy, 'relaxed' for periods of calmness, 'surprised' for shock or disbelief, 'shy' for instances of hesitation, 'jealous' for feelings of envy, 'bored' for expressions of disinterest, 'serious' for intense focus on important topics, 'suspicious' for doubt or skepticism, 'victory' for moments of triumph, 'sleep' for signs of weariness, and 'love' for affectionate expressions.
 

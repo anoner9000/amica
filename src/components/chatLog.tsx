@@ -6,6 +6,12 @@ import FlexTextarea from "@/components/flexTextarea/flexTextarea";
 import { Message } from "@/features/chat/messages";
 import { ChatSpeechRenderButton } from "@/features/deiphobeSpeech/ChatSpeechRenderButton";
 import { ChatAvatarCueButton } from "@/features/deiphobeSpeech/ChatAvatarCueButton";
+import {
+  callSmartChunkRender,
+  playSmartChunks,
+  stopSmartChunkPlayback,
+  type SmartChunkStatus,
+} from "@/features/deiphobeSpeech/smartChunkSpeech";
 import { ViewerContext } from "@/features/vrmViewer/viewerContext";
 import { resolveAnimationStatePath } from "@/features/vrmViewer/animationState";
 import { loadVRMAnimation } from "@/lib/VRMAnimation/loadVRMAnimation";
@@ -32,6 +38,18 @@ export const ChatLog = ({
     config("deiphobe_speech_autoplay_enabled") === "true";
   const speechChatControlsEnabled =
     config("deiphobe_speech_chat_controls_enabled") === "true";
+
+  // Smart-chunk autoplay — dev-only, disabled by default.
+  const autoRenderEnabled =
+    config("deiphobe_speech_auto_render_enabled") === "true";
+  const autoPlayEnabled =
+    config("deiphobe_speech_auto_play_enabled") === "true";
+
+  // Index of the last assistant message in the list.
+  const newestAssistantIdx = messages.reduce<number>(
+    (acc, msg, i) => (msg.role === "assistant" ? i : acc),
+    -1,
+  );
 
   const handleDispatchCue = viewer?.model
     ? async (voiceMode: string) => {
@@ -85,7 +103,7 @@ export const ChatLog = ({
             } else {
               bot.bubbleMessage(lastMessage.role, lastMessage.content as string);
             }
-          } 
+          }
           console.error("Please attach the correct file format.");
         } catch (e: any) {
           console.error(e.toString());
@@ -158,6 +176,15 @@ export const ChatLog = ({
               msg.role === "assistant" &&
               msg.voice_posture !== "private_memory";
             const autoPlayAfterRender = speechAutoPlayEnabled;
+
+            // Smart-chunk autoplay: only for the newest assistant message,
+            // never for private_memory, never for user messages.
+            const autoSmartRender =
+              autoRenderEnabled &&
+              msg.role === "assistant" &&
+              msg.voice_posture !== "private_memory" &&
+              i === newestAssistantIdx;
+
             return (
               <div key={i} ref={messages.length - 1 === i ? chatScrollRef : null}>
                 <Chat
@@ -171,6 +198,8 @@ export const ChatLog = ({
                   autoPreRender={autoPreRender}
                   autoPlayAfterRender={autoPlayAfterRender}
                   speechControlsEnabled={speechChatControlsEnabled}
+                  autoSmartRender={autoSmartRender}
+                  autoSmartPlay={autoPlayEnabled}
                 />
 
               </div>
@@ -200,6 +229,8 @@ function Chat({
   autoPreRender = false,
   autoPlayAfterRender = false,
   speechControlsEnabled = false,
+  autoSmartRender = false,
+  autoSmartPlay = false,
 }: {
   role: string;
   message: string;
@@ -211,16 +242,73 @@ function Chat({
   autoPreRender?: boolean;
   autoPlayAfterRender?: boolean;
   speechControlsEnabled?: boolean;
+  autoSmartRender?: boolean;
+  autoSmartPlay?: boolean;
 }) {
   const { t } = useTranslation();
-  // const [textAreaValue, setTextAreaValue] = useState(message);
+
+  // ── smart-chunk render/play state ─────────────────────────────────────────
+  const [smartStatus, setSmartStatus] = useState<SmartChunkStatus>("idle");
+
+  // Refs so async handlers can read the latest prop values without going stale.
+  const autoSmartRenderRef = useRef(autoSmartRender);
+  const autoSmartPlayRef = useRef(autoSmartPlay);
+  const messageRef = useRef(message);
+  useEffect(() => { autoSmartRenderRef.current = autoSmartRender; }, [autoSmartRender]);
+  useEffect(() => { autoSmartPlayRef.current = autoSmartPlay; }, [autoSmartPlay]);
+  useEffect(() => { messageRef.current = message; }, [message]);
+
+  // Track the previous autoSmartRender value to detect true→false transitions.
+  const prevAutoSmartRenderRef = useRef(false);
+  // Guard: fire render at most once per "this is the newest message" period.
+  const smartRenderFiredRef = useRef(false);
+
+  // Cancel playback when this message is no longer the newest (autoSmartRender: true→false).
+  useEffect(() => {
+    const wasNewest = prevAutoSmartRenderRef.current;
+    prevAutoSmartRenderRef.current = autoSmartRender;
+
+    if (wasNewest && !autoSmartRender) {
+      stopSmartChunkPlayback();
+      setSmartStatus("idle");
+      smartRenderFiredRef.current = false;
+    }
+  }, [autoSmartRender]);
+
+  // Auto-render + optional auto-play for the newest assistant message.
+  useEffect(() => {
+    if (!autoSmartRender || role !== "assistant") return;
+    if (smartRenderFiredRef.current) return;
+    smartRenderFiredRef.current = true;
+
+    void (async () => {
+      setSmartStatus("rendering");
+      const result = await callSmartChunkRender(messageRef.current);
+
+      // Bail if we're no longer the newest message.
+      if (!autoSmartRenderRef.current) {
+        setSmartStatus("idle");
+        return;
+      }
+
+      if (!result.ok) {
+        setSmartStatus("error");
+        return;
+      }
+
+      setSmartStatus("ready");
+
+      if (autoSmartPlayRef.current && result.audioUrls.length > 0) {
+        await playSmartChunks(result.audioUrls, setSmartStatus);
+      }
+    })();
+  }, [autoSmartRender, role]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── render ────────────────────────────────────────────────────────────────
 
   const onClickButton = () => {
-    const newMessage = message
-    onClickResumeButton(num, newMessage);
+    onClickResumeButton(num, message);
   };
-
-
 
   return (
     <div className={clsx(
@@ -259,11 +347,19 @@ function Chat({
               {speechControlsEnabled && (
                 <ChatAvatarCueButton voice_posture={voice_posture} animation_state={animation_state} onDispatchCue={onDispatchCue} />
               )}
+              {smartStatus !== "idle" && (
+                <SmartChunkStatusBar
+                  status={smartStatus}
+                  onStop={() => {
+                    stopSmartChunkPlayback();
+                    setSmartStatus("ready");
+                  }}
+                />
+              )}
             </>
           ) : (
             <FlexTextarea
               value={message}
-              // onChange={setTextAreaValue}
             />
           )}
         </div>
@@ -271,3 +367,35 @@ function Chat({
     </div>
   );
 };
+
+function SmartChunkStatusBar({
+  status,
+  onStop,
+}: {
+  status: SmartChunkStatus;
+  onStop: () => void;
+}) {
+  return (
+    <div
+      className="mt-1 flex items-center gap-2 text-xs text-gray-500"
+      aria-live="polite"
+    >
+      {status === "rendering" && <span>Preparing voice…</span>}
+      {status === "ready" && <span>Voice ready</span>}
+      {status === "playing" && (
+        <>
+          <span>Speaking…</span>
+          <button
+            aria-label="Stop voice"
+            onClick={onStop}
+            className="underline text-red-500 hover:text-red-700"
+          >
+            Stop voice
+          </button>
+        </>
+      )}
+      {status === "complete" && <span>Voice complete</span>}
+      {status === "error" && <span>Voice unavailable</span>}
+    </div>
+  );
+}
