@@ -7,6 +7,7 @@ export class LipSync {
   public readonly audio: AudioContext;
   public readonly analyser: AnalyserNode;
   public readonly timeDomainData: Float32Array;
+  private _currentSource: AudioBufferSourceNode | null = null;
 
   public constructor(audio: AudioContext) {
     this.audio = audio;
@@ -43,9 +44,22 @@ export class LipSync {
     bufferSource.connect(gain);
     gain.connect(this.audio.destination);
     gain.connect(this.analyser);
+
+    this._currentSource = bufferSource;
+    bufferSource.addEventListener("ended", () => {
+      if (this._currentSource === bufferSource) this._currentSource = null;
+    });
+
     bufferSource.start();
     if (onEnded) {
       bufferSource.addEventListener("ended", onEnded);
+    }
+  }
+
+  public stopCurrent(): void {
+    if (this._currentSource) {
+      try { this._currentSource.stop(); } catch (_) {}
+      this._currentSource = null;
     }
   }
 

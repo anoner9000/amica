@@ -762,7 +762,8 @@ describe("ChatLog — D6 smart-chunk autoplay", () => {
     );
     expect(getSmartMocks().callSmartChunkRender).toHaveBeenCalledTimes(1);
     expect(getSmartMocks().playSmartChunks).toHaveBeenCalledTimes(1);
-    expect(getSmartMocks().playSmartChunks).toHaveBeenCalledWith(CHUNK_URLS, expect.any(Function));
+    // Third arg is undefined when viewer.model is undefined (no lip sync available).
+    expect(getSmartMocks().playSmartChunks).toHaveBeenCalledWith(CHUNK_URLS, expect.any(Function), undefined);
   });
 
   // ── private_memory excluded ───────────────────────────────────────────────
@@ -940,5 +941,59 @@ describe("ChatLog — D6 smart-chunk autoplay", () => {
     // Only one render call — for the newest (msgB).
     expect(getSmartMocks().callSmartChunkRender).toHaveBeenCalledTimes(1);
     expect(getSmartMocks().callSmartChunkRender).toHaveBeenCalledWith("Second reply.");
+  });
+
+  // ── lip sync plumbing ─────────────────────────────────────────────────────
+  // When viewer.model._lipSync is available it must be forwarded as the third
+  // argument to playSmartChunks so audio routes through the AudioContext analyser.
+
+  test("playSmartChunks receives lipSync from viewer when model has _lipSync", async () => {
+    mockRenderSuccess();
+    mockPlayCompletes();
+
+    const mockLipSync = { audio: {}, analyser: {}, stopCurrent: jest.fn(), playFromArrayBuffer: jest.fn() };
+
+    // Override the ViewerContext mock for this test only.
+    const viewerContextMod = require("../src/features/vrmViewer/viewerContext") as {
+      ViewerContext: React.Context<any>;
+    };
+    const OriginalContext = viewerContextMod.ViewerContext;
+
+    setSmartConfig(true, true);
+    const { ChatLog } = await import("../src/components/chatLog");
+
+    await act(async () => {
+      root.render(
+        <OriginalContext.Provider value={{ viewer: { model: { _lipSync: mockLipSync }, resetCameraLerp: () => {} } }}>
+          <ChatLog messages={[{ role: "assistant", content: "Hello.", voice_posture: "neutral" }] as any} />
+        </OriginalContext.Provider>,
+      );
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(getSmartMocks().playSmartChunks).toHaveBeenCalledWith(
+      CHUNK_URLS,
+      expect.any(Function),
+      mockLipSync,
+    );
+  });
+
+  test("playSmartChunks receives undefined lipSync when model is absent", async () => {
+    mockRenderSuccess();
+    mockPlayCompletes();
+
+    setSmartConfig(true, true);
+    const { ChatLog } = await import("../src/components/chatLog");
+
+    await act(async () => {
+      root.render(<ChatLog messages={[{ role: "assistant", content: "Hello.", voice_posture: "neutral" }] as any} />);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(getSmartMocks().playSmartChunks).toHaveBeenCalledWith(
+      CHUNK_URLS,
+      expect.any(Function),
+      undefined,
+    );
   });
 });

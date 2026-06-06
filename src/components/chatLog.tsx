@@ -200,6 +200,7 @@ export const ChatLog = ({
                   speechControlsEnabled={speechChatControlsEnabled}
                   autoSmartRender={autoSmartRender}
                   autoSmartPlay={autoPlayEnabled}
+                  lipSync={viewer?.model?._lipSync}
                 />
 
               </div>
@@ -231,6 +232,7 @@ function Chat({
   speechControlsEnabled = false,
   autoSmartRender = false,
   autoSmartPlay = false,
+  lipSync,
 }: {
   role: string;
   message: string;
@@ -244,6 +246,7 @@ function Chat({
   speechControlsEnabled?: boolean;
   autoSmartRender?: boolean;
   autoSmartPlay?: boolean;
+  lipSync?: import("@/features/lipSync/lipSync").LipSync;
 }) {
   const { t } = useTranslation();
 
@@ -299,7 +302,7 @@ function Chat({
       setSmartStatus("ready");
 
       if (autoSmartPlayRef.current && result.audioUrls.length > 0) {
-        await playSmartChunks(result.audioUrls, setSmartStatus);
+        await playSmartChunks(result.audioUrls, setSmartStatus, lipSync);
       }
     })();
   }, [autoSmartRender, role]); // eslint-disable-line react-hooks/exhaustive-deps

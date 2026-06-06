@@ -4,6 +4,7 @@
  */
 
 import { readSpeechPlaybackMuted, readSpeechPlaybackVolume } from "./playbackSettings";
+import type { LipSync } from "@/features/lipSync/lipSync";
 
 export type SmartChunkStatus =
   | "idle"
@@ -29,6 +30,7 @@ const SMART_CHUNKS_ENDPOINT =
 let _sessionId = 0;
 let _currentAudio: HTMLAudioElement | null = null;
 let _volumePoller: ReturnType<typeof setInterval> | null = null;
+let _currentLipSync: LipSync | null = null;
 
 // Perceptual loudness: power-curve so mid-slider is actually mid-loudness.
 function applyVolumeCurve(raw: number): number {
@@ -95,6 +97,10 @@ export function stopSmartChunkPlayback(): void {
     _currentAudio.src = "";
     _currentAudio = null;
   }
+  if (_currentLipSync) {
+    _currentLipSync.stopCurrent();
+    _currentLipSync = null;
+  }
 }
 
 function _makeAudio(url: string): HTMLAudioElement {
@@ -104,33 +110,85 @@ function _makeAudio(url: string): HTMLAudioElement {
   return audio;
 }
 
-export async function playSmartChunks(
+async function _fetchBuffer(url: string): Promise<ArrayBuffer> {
+  const resp = await fetch(url);
+  return resp.arrayBuffer();
+}
+
+// ── LipSync path ──────────────────────────────────────────────────────────────
+// Routes audio through the model's AudioContext + AnalyserNode so the avatar
+// mouth moves during playback. Requires CORS headers on the audio server
+// (the Qwen3 VoiceDesign server already sets Access-Control-Allow-Origin: *).
+
+async function _playWithLipSync(
   audioUrls: string[],
   onStatus: (s: SmartChunkStatus) => void,
+  lipSync: LipSync,
+  mySessionId: number,
 ): Promise<void> {
-  stopSmartChunkPlayback();
-  const mySessionId = _sessionId;
-
-  if (audioUrls.length === 0) {
-    onStatus("complete");
-    return;
+  // Resume AudioContext if the browser auto-suspended it.
+  if (lipSync.audio.state === "suspended") {
+    try { await lipSync.audio.resume(); } catch (_) {}
   }
 
   onStatus("playing");
+
+  // Pre-fetch the first chunk immediately.
+  let prefetched: Promise<ArrayBuffer> = _fetchBuffer(audioUrls[0]);
+
+  for (let i = 0; i < audioUrls.length; i++) {
+    if (_sessionId !== mySessionId) return;
+
+    let buffer: ArrayBuffer;
+    try {
+      buffer = await prefetched;
+    } catch {
+      if (_sessionId === mySessionId) onStatus("error");
+      return;
+    }
+
+    if (_sessionId !== mySessionId) return;
+
+    // Pre-fetch next chunk while this one plays.
+    prefetched = i + 1 < audioUrls.length
+      ? _fetchBuffer(audioUrls[i + 1])
+      : Promise.resolve(new ArrayBuffer(0));
+
+    await new Promise<void>((resolve) => {
+      const done = () => resolve();
+      lipSync.playFromArrayBuffer(buffer, done, readCurrentVolume()).catch(() => {
+        if (_sessionId === mySessionId) onStatus("error");
+        resolve();
+      });
+    });
+  }
+
+  if (_sessionId === mySessionId) {
+    _currentLipSync = null;
+    onStatus("complete");
+  }
+}
+
+// ── HTML audio fallback ───────────────────────────────────────────────────────
+// Used when no LipSync is available. No mouth movement, but audio still plays.
+
+async function _playWithAudio(
+  audioUrls: string[],
+  onStatus: (s: SmartChunkStatus) => void,
+  mySessionId: number,
+): Promise<void> {
+  onStatus("playing");
   startVolumePoller();
 
-  // Pre-buffer the first chunk immediately so it's ready when the loop starts.
   let prefetched: HTMLAudioElement | null = _makeAudio(audioUrls[0]);
 
   for (let i = 0; i < audioUrls.length; i++) {
     if (_sessionId !== mySessionId) { stopVolumePoller(); return; }
 
-    // Grab the pre-buffered element for this index (or create fresh on first iteration).
     const audio = prefetched ?? _makeAudio(audioUrls[i]);
     audio.volume = readCurrentVolume();
     _currentAudio = audio;
 
-    // Start pre-buffering the next chunk while this one plays.
     prefetched = i + 1 < audioUrls.length ? _makeAudio(audioUrls[i + 1]) : null;
 
     await new Promise<void>((resolve) => {
@@ -145,7 +203,6 @@ export async function playSmartChunks(
       const playPromise = audio.play();
       if (playPromise && typeof playPromise.then === "function") {
         playPromise.catch(() => {
-          // Browser rejected autoplay — treat as error but don't mutate text.
           onStatus("error");
           done();
         });
@@ -157,5 +214,28 @@ export async function playSmartChunks(
     stopVolumePoller();
     _currentAudio = null;
     onStatus("complete");
+  }
+}
+
+// ── public API ────────────────────────────────────────────────────────────────
+
+export async function playSmartChunks(
+  audioUrls: string[],
+  onStatus: (s: SmartChunkStatus) => void,
+  lipSync?: LipSync,
+): Promise<void> {
+  stopSmartChunkPlayback();
+  const mySessionId = _sessionId;
+
+  if (audioUrls.length === 0) {
+    onStatus("complete");
+    return;
+  }
+
+  if (lipSync) {
+    _currentLipSync = lipSync;
+    await _playWithLipSync(audioUrls, onStatus, lipSync, mySessionId);
+  } else {
+    await _playWithAudio(audioUrls, onStatus, mySessionId);
   }
 }
