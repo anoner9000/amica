@@ -6,12 +6,12 @@ AMICA_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CLAWDAWG_ROOT="$(cd "$AMICA_ROOT/.." && pwd)"
 VOICE_CONTROL="$CLAWDAWG_ROOT/ops/scripts/deiphobe/qwen3_voicedesign_control.sh"
 AMICA_URL="http://127.0.0.1:3000"
-BRIDGE_HEALTH_URL="http://127.0.0.1:8766/health"
+BRIDGE_HEALTH_URL="http://127.0.0.1:8767/health"
 ENV_FILE="$AMICA_ROOT/.env.local"
 REQUIRED_ENV_VARS=(
   "NEXT_PUBLIC_DEVELOPMENT_BASE_URL=http://127.0.0.1:3000"
-  "NEXT_PUBLIC_DEIPHOBE_SPEECH_DEBUG_BRIDGE_URL=http://127.0.0.1:8766/debug/deiphobe_speech_payload"
-  "NEXT_PUBLIC_DEIPHOBE_SPEECH_RENDER_BRIDGE_URL=http://127.0.0.1:8766/debug/deiphobe_speech_render"
+  "NEXT_PUBLIC_DEIPHOBE_SPEECH_DEBUG_BRIDGE_URL=http://127.0.0.1:8767/debug/deiphobe_speech_payload"
+  "NEXT_PUBLIC_DEIPHOBE_SPEECH_RENDER_BRIDGE_URL=http://127.0.0.1:8767/debug/deiphobe_speech_render"
 )
 
 die() {
@@ -70,8 +70,8 @@ main() {
   check_bridge
   echo "Amica env verified: $ENV_FILE"
   echo "Development base URL: http://127.0.0.1:3000"
-  echo "Speech debug bridge URL: http://127.0.0.1:8766/debug/deiphobe_speech_payload"
-  echo "Speech render bridge URL: http://127.0.0.1:8766/debug/deiphobe_speech_render"
+  echo "Speech debug bridge URL: http://127.0.0.1:8767/debug/deiphobe_speech_payload"
+  echo "Speech render bridge URL: http://127.0.0.1:8767/debug/deiphobe_speech_render"
   start_amica
 }
 
