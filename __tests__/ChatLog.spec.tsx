@@ -32,7 +32,10 @@ jest.mock("../src/utils/chatDisplayName", () => ({
 }));
 
 jest.mock("../src/utils/config", () => ({
-  config: jest.fn().mockReturnValue("false"),
+  config: jest.fn().mockImplementation((key: string) => {
+    if (key === "deiphobe_speech_chat_controls_enabled") return "true";
+    return "false";
+  }),
 }));
 
 jest.mock("../src/features/chat/chatContext", () => {
@@ -422,6 +425,7 @@ describe("ChatLog — D5 setting-gated pre-render", () => {
 
   function setSpeechConfig(prerenderEnabled = false, autoplayEnabled = false) {
     getConfigMock().mockImplementation((key: string) => {
+      if (key === "deiphobe_speech_chat_controls_enabled") return "true";
       if (key === "deiphobe_speech_prerender_enabled") {
         return prerenderEnabled ? "true" : "false";
       }

@@ -99,6 +99,7 @@ export const defaults = {
   coqui_apikey: process.env.NEXT_PUBLIC_COQUI_APIKEY ?? "",
   coqui_voice_id: process.env.NEXT_PUBLIC_COQUI_VOICEID ?? "71c6c3eb-98ca-4a05-8d6b-f8c2b5f9f3a3",
   deiphobe_speech_prerender_enabled: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_PRERENDER_ENABLED ?? 'false',
+  deiphobe_speech_chat_controls_enabled: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_CHAT_CONTROLS_ENABLED ?? 'false',
   amica_life_enabled: process.env.NEXT_PUBLIC_AMICA_LIFE_ENABLED ?? 'true',
   reasoning_engine_enabled: process.env.NEXT_PUBLIC_REASONING_ENGINE_ENABLED ?? 'false',
   reasoning_engine_url: process.env.NEXT_PUBLIC_REASONING_ENGINE_URL ?? 'https://i-love-amica.com:3000/reasoning/v1/chat/completions',

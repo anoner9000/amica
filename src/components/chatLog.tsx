@@ -30,6 +30,8 @@ export const ChatLog = ({
     config("deiphobe_speech_prerender_enabled") === "true";
   const speechAutoPlayEnabled =
     config("deiphobe_speech_autoplay_enabled") === "true";
+  const speechChatControlsEnabled =
+    config("deiphobe_speech_chat_controls_enabled") === "true";
 
   const handleDispatchCue = viewer?.model
     ? async (voiceMode: string) => {
@@ -168,6 +170,7 @@ export const ChatLog = ({
                   onDispatchCue={handleDispatchCue}
                   autoPreRender={autoPreRender}
                   autoPlayAfterRender={autoPlayAfterRender}
+                  speechControlsEnabled={speechChatControlsEnabled}
                 />
 
               </div>
@@ -196,6 +199,7 @@ function Chat({
   onDispatchCue,
   autoPreRender = false,
   autoPlayAfterRender = false,
+  speechControlsEnabled = false,
 }: {
   role: string;
   message: string;
@@ -206,6 +210,7 @@ function Chat({
   onDispatchCue?: (voiceMode: string) => Promise<void>;
   autoPreRender?: boolean;
   autoPlayAfterRender?: boolean;
+  speechControlsEnabled?: boolean;
 }) {
   const { t } = useTranslation();
   // const [textAreaValue, setTextAreaValue] = useState(message);
@@ -248,8 +253,12 @@ function Chat({
           {role === "assistant" ? (
             <>
               <div>{message}</div>
-              <ChatSpeechRenderButton text={message} voice_posture={voice_posture} animation_state={animation_state} autoPreRender={autoPreRender} autoPlayAfterRender={autoPlayAfterRender} />
-              <ChatAvatarCueButton voice_posture={voice_posture} animation_state={animation_state} onDispatchCue={onDispatchCue} />
+              {speechControlsEnabled && (
+                <ChatSpeechRenderButton text={message} voice_posture={voice_posture} animation_state={animation_state} autoPreRender={autoPreRender} autoPlayAfterRender={autoPlayAfterRender} />
+              )}
+              {speechControlsEnabled && (
+                <ChatAvatarCueButton voice_posture={voice_posture} animation_state={animation_state} onDispatchCue={onDispatchCue} />
+              )}
             </>
           ) : (
             <FlexTextarea
