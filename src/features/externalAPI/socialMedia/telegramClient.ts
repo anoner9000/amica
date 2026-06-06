@@ -31,6 +31,13 @@ class TelegramClient {
   }
 }
 
-// Export an instance of the TelegramClient class for use
-export const telegramClientInstance = new TelegramClient();
+// Lazy singleton — only instantiated when TELEGRAM_BOT_TOKEN is present.
+let _instance: TelegramClient | null = null;
+
+export function getTelegramClient(): TelegramClient | null {
+  if (!_instance && process.env.TELEGRAM_BOT_TOKEN) {
+    try { _instance = new TelegramClient(); } catch { _instance = null; }
+  }
+  return _instance;
+}
 
