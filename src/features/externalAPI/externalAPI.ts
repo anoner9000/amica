@@ -121,7 +121,7 @@ export async function handleUserInput(message: string) {
       systemPrompt: config("system_prompt"),
       message: message,
     }),
-  });
+  }).catch(() => {});
 }
 
 export async function handleChatLogs(messages: Message[]) {
@@ -133,7 +133,7 @@ export async function handleChatLogs(messages: Message[]) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(messages),
-  });
+  }).catch(() => {});
 }
 
 export async function handleSubconscious(
