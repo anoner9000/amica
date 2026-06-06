@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { resolveAnimationStatePath } from "../vrmViewer/animationState";
 import { mockSpeechPayload, type SpeechDebugPayload } from "./mockSpeechPayload";
-import { SPEECH_RENDER_ENDPOINT, type SpeechRenderResult } from "./renderBridge";
+import { callSpeechRenderBridge, SPEECH_RENDER_ENDPOINT, type SpeechRenderResult } from "./renderBridge";
 import {
   readSpeechPlaybackMuted,
   readSpeechPlaybackVolume,
@@ -220,30 +220,14 @@ export function SpeechDebugPanel({
     setIsRendering(true);
     setRenderStatusMessage(null);
     try {
-      const response = await fetch(SPEECH_RENDER_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: requestText,
-          posture: requestPosture,
-          operator_name: requestOperatorName.trim() || undefined,
-          private_mode: requestPrivateMode,
-          include_render_request: requestIncludeRenderRequest,
-          output_filename: RENDER_OUTPUT_FILENAME,
-        }),
+      const result = await callSpeechRenderBridge({
+        text: requestText,
+        posture: requestPosture,
+        operator_name: requestOperatorName.trim() || undefined,
+        private_mode: requestPrivateMode,
+        include_render_request: requestIncludeRenderRequest,
+        output_filename: RENDER_OUTPUT_FILENAME,
       });
-
-      if (response.status === 403) {
-        setRenderStatusMessage("Speech render bridge is disabled");
-        return;
-      }
-
-      if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        throw new Error(body.trim() || `Speech render bridge request failed (${response.status})`);
-      }
-
-      const result = (await response.json()) as SpeechRenderResult;
       setRenderResult(result);
     } catch (error) {
       setRenderStatusMessage(

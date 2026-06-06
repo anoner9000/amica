@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import isDev from "@/utils/isDev";
 import {
+  callSpeechRenderBridge,
   makeUniqueSpeechOutputFilename,
   SPEECH_RENDER_ENDPOINT,
   type SpeechRenderResult,
@@ -48,17 +49,10 @@ export function ChatSpeechRenderButton({
     setRenderResult(null);
     try {
       const outputFilename = makeUniqueSpeechOutputFilename("deiphobe-chat-render", text);
-      const resp = await fetch(renderEndpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text,
-          posture: effectivePosture,
-          include_render_request: true,
-          output_filename: outputFilename,
-        }),
-      });
-      const data: SpeechRenderResult = await resp.json();
+      const data = await callSpeechRenderBridge(
+        { text, posture: effectivePosture, output_filename: outputFilename },
+        renderEndpoint,
+      );
       setRenderResult(data);
       if (data.rendered && data.audio_url) {
         setAudioUrl(data.audio_url);
