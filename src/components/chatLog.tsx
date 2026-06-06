@@ -155,9 +155,7 @@ export const ChatLog = ({
               speechPreRenderEnabled &&
               msg.role === "assistant" &&
               msg.voice_posture !== "private_memory";
-            const autoPlayAfterRender =
-              autoPreRender &&
-              speechAutoPlayEnabled;
+            const autoPlayAfterRender = speechAutoPlayEnabled;
             return (
               <div key={i} ref={messages.length - 1 === i ? chatScrollRef : null}>
                 <Chat

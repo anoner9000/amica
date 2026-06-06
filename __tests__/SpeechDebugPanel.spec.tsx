@@ -12,6 +12,11 @@ jest.mock("react-i18next", () => ({
 }));
 
 jest.mock("../src/utils/config", () => ({
+  config: jest.fn((key: string) => {
+    if (key === "tts_muted") return "false";
+    if (key === "tts_volume") return "0.6";
+    return "false";
+  }),
   updateConfig: jest.fn(),
 }));
 

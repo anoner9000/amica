@@ -51,6 +51,7 @@ import {
   resolveAnimationStatePath,
   selectAnimationStateFromExpression,
 } from "@/features/vrmViewer/animationState";
+import { isDeiphobeSpeechRenderBridgeConfigured } from "@/features/deiphobeSpeech/renderBridge";
 
 type Speak = {
   audioBuffer: ArrayBuffer | null;
@@ -712,12 +713,16 @@ export class Chat {
       const reply = receivedMessage.trim();
       if (reply && this.currentStreamIdx === streamIdx) {
         this.bubbleMessage("assistant", reply);
-        const screenplay = textsToScreenplay([`[neutral] ${reply}`])[0];
-        this.ttsJobs.enqueue({
-          screenplay,
-          streamIdx,
-          display: false,
-        });
+        if (!isDeiphobeSpeechRenderBridgeConfigured()) {
+          const screenplay = textsToScreenplay([`[neutral] ${reply}`])[0];
+          this.ttsJobs.enqueue({
+            screenplay,
+            streamIdx,
+            display: false,
+          });
+        } else {
+          console.debug("Deiphobe speech render bridge configured; skipping legacy frontend TTS path.");
+        }
       }
     } catch (e: any) {
       const errMsg = e.toString();

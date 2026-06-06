@@ -235,6 +235,46 @@ describe("ChatLog — voice_posture plumbing", () => {
     const audio = getAudio();
     expect(audio).not.toBeNull();
     expect(audio?.hasAttribute("autoplay")).toBe(false);
+    expect(audio?.getAttribute("src")).toBe(AUDIO_URL);
+  });
+
+  test("manual re-render replaces stale audio with the newest response", async () => {
+    global.fetch = jest
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          rendered: true,
+          status: "rendered",
+          audio_url: "http://127.0.0.1:8767/debug/deiphobe_speech_audio/first.wav",
+        }),
+      } as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          rendered: true,
+          status: "rendered",
+          audio_url: "http://127.0.0.1:8767/debug/deiphobe_speech_audio/second.wav",
+        }),
+      } as any);
+    await renderChatLog([
+      { role: "assistant", content: "I held the line.", voice_posture: "memory_recall" },
+    ]);
+    await act(async () => {
+      Simulate.click(getRenderButton()!);
+      await flush();
+    });
+    const firstAudio = getAudio();
+    expect(firstAudio?.getAttribute("src")).toMatch(/first\.wav$/);
+
+    await act(async () => {
+      Simulate.click(getRenderButton()!);
+      await flush();
+    });
+    const secondAudio = getAudio();
+    expect(secondAudio).not.toBeNull();
+    expect(secondAudio).not.toBe(firstAudio);
+    expect(secondAudio?.getAttribute("src")).toMatch(/second\.wav$/);
   });
 
   // ── bridge failure ────────────────────────────────────────────────────────

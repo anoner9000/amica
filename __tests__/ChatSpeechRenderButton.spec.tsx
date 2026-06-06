@@ -45,6 +45,8 @@ describe("ChatSpeechRenderButton", () => {
     originalAudioPlayDescriptor = Object.getOwnPropertyDescriptor(HTMLAudioElement.prototype, "play");
     originalMediaPlayDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "play");
     playSpy = jest.fn().mockResolvedValue(undefined);
+    window.localStorage.setItem("chatvrm_tts_muted", "false");
+    window.localStorage.setItem("chatvrm_tts_volume", "0.6");
     Object.defineProperty(HTMLAudioElement.prototype, "play", {
       configurable: true,
       value: playSpy,
@@ -67,6 +69,7 @@ describe("ChatSpeechRenderButton", () => {
     if (originalMediaPlayDescriptor) {
       Object.defineProperty(HTMLMediaElement.prototype, "play", originalMediaPlayDescriptor);
     }
+    window.localStorage.clear();
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = originalActEnvironment;
   });
 
@@ -128,6 +131,11 @@ describe("ChatSpeechRenderButton", () => {
     expect(global.fetch).toHaveBeenCalledWith(
       TEST_ENDPOINT,
       expect.objectContaining({ method: "POST" }),
+    );
+    const [, init] = (global.fetch as jest.Mock<typeof fetch>).mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.output_filename).toMatch(
+      /^deiphobe-chat-render-[a-z0-9-]+-\d+-[a-z0-9]+\.wav$/,
     );
   });
 
@@ -205,6 +213,35 @@ describe("ChatSpeechRenderButton", () => {
     expect(audio?.getAttribute("src")).toBe(AUDIO_URL);
   });
 
+  test("new render replaces the current audio source with the latest response", async () => {
+    global.fetch = jest
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => makeSuccessResponse("http://127.0.0.1:8767/debug/deiphobe_speech_audio/first.wav"),
+      } as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => makeSuccessResponse("http://127.0.0.1:8767/debug/deiphobe_speech_audio/second.wav"),
+      } as any);
+    renderButton();
+    await act(async () => {
+      Simulate.click(getButton());
+      await flush();
+    });
+    const firstAudio = getAudio();
+    expect(firstAudio?.getAttribute("src")).toMatch(/first\.wav$/);
+
+    await act(async () => {
+      Simulate.click(getButton());
+      await flush();
+    });
+    const secondAudio = getAudio();
+    expect(secondAudio).not.toBeNull();
+    expect(secondAudio).not.toBe(firstAudio);
+    expect(secondAudio?.getAttribute("src")).toMatch(/second\.wav$/);
+  });
+
   // ── no autoplay ───────────────────────────────────────────────────────────
 
   test("audio control has no autoplay attribute", async () => {
@@ -229,14 +266,41 @@ describe("ChatSpeechRenderButton", () => {
     expect(playSpy).not.toHaveBeenCalled();
   });
 
-  test("manual render does not autoplay even if autoplay is enabled", async () => {
+  test("manual render autoplays when autoplay is enabled", async () => {
     mockFetch(makeSuccessResponse(AUDIO_URL));
     renderButton({ autoPlayAfterRender: true, voice_posture: "memory_recall" });
     await act(async () => {
       Simulate.click(getButton());
       await flush();
+      await flush();
     });
-    expect(playSpy).not.toHaveBeenCalled();
+    expect(playSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("missing audio_url shows a clear error instead of rendering an unusable player", async () => {
+    mockFetch({ rendered: true, status: "rendered", audio_url: null, render_engine: "qwen3_direct_clone" });
+    renderButton();
+    await act(async () => {
+      Simulate.click(getButton());
+      await flush();
+    });
+    expect(getAudio()).toBeNull();
+    expect(getError()).toContain("Speech render succeeded without audio_url.");
+  });
+
+  test("applies current volume and mute settings to the audio element", async () => {
+    window.localStorage.setItem("chatvrm_tts_muted", "true");
+    window.localStorage.setItem("chatvrm_tts_volume", "0.45");
+    mockFetch(makeSuccessResponse(AUDIO_URL));
+    renderButton();
+    await act(async () => {
+      Simulate.click(getButton());
+      await flush();
+    });
+    const audio = getAudio();
+    expect(audio).not.toBeNull();
+    expect(audio?.muted).toBe(true);
+    expect(audio?.volume).toBeCloseTo(0.45);
   });
 
   // ── bridge failure: text intact, safe error shown ─────────────────────────
@@ -298,6 +362,8 @@ describe("ChatSpeechRenderButton — D5 auto pre-render", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     global.fetch = jest.fn() as any;
+    window.localStorage.setItem("chatvrm_tts_muted", "false");
+    window.localStorage.setItem("chatvrm_tts_volume", "0.6");
     originalAudioPlayDescriptor = Object.getOwnPropertyDescriptor(HTMLAudioElement.prototype, "play");
     originalMediaPlayDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "play");
     playMock = jest.fn().mockResolvedValue(undefined);
@@ -321,6 +387,7 @@ describe("ChatSpeechRenderButton — D5 auto pre-render", () => {
     if (originalMediaPlayDescriptor) {
       Object.defineProperty(HTMLMediaElement.prototype, "play", originalMediaPlayDescriptor);
     }
+    window.localStorage.clear();
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = originalActEnvironment;
   });
 

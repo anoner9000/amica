@@ -1,14 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
-
-const SPEECH_RENDER_ENDPOINT =
-  process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_RENDER_BRIDGE_URL ?? "/debug/deiphobe_speech_render";
-
-type RenderResult = {
-  rendered: boolean;
-  status: string;
-  error?: string | null;
-  audio_url?: string | null;
-};
+import isDev from "@/utils/isDev";
+import {
+  makeUniqueSpeechOutputFilename,
+  SPEECH_RENDER_ENDPOINT,
+  type SpeechRenderResult,
+} from "./renderBridge";
+import {
+  readSpeechPlaybackMuted,
+  readSpeechPlaybackVolume,
+} from "./playbackSettings";
 
 export function ChatSpeechRenderButton({
   text,
@@ -29,19 +29,25 @@ export function ChatSpeechRenderButton({
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [playbackStatus, setPlaybackStatus] = useState<string | null>(null);
+  const [renderResult, setRenderResult] = useState<SpeechRenderResult | null>(null);
   const preRenderFired = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const autoPlayFiredForUrl = useRef<string | null>(null);
 
   const effectivePosture =
     (voice_posture ?? "").trim() || (animation_state ?? "").trim() || "neutral";
+  const isMuted = readSpeechPlaybackMuted();
+  const volume = readSpeechPlaybackVolume();
 
   async function handleRender() {
     if (isRendering) return;
     setIsRendering(true);
     setRenderError(null);
     setPlaybackStatus(null);
+    setAudioUrl(null);
+    setRenderResult(null);
     try {
+      const outputFilename = makeUniqueSpeechOutputFilename("deiphobe-chat-render", text);
       const resp = await fetch(renderEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -49,12 +55,15 @@ export function ChatSpeechRenderButton({
           text,
           posture: effectivePosture,
           include_render_request: true,
-          output_filename: "deiphobe-chat-render.wav",
+          output_filename: outputFilename,
         }),
       });
-      const data: RenderResult = await resp.json();
+      const data: SpeechRenderResult = await resp.json();
+      setRenderResult(data);
       if (data.rendered && data.audio_url) {
         setAudioUrl(data.audio_url);
+      } else if (data.rendered) {
+        setRenderError("Speech render succeeded without audio_url.");
       } else {
         setRenderError(data.error ?? data.status ?? "Render failed");
       }
@@ -66,7 +75,7 @@ export function ChatSpeechRenderButton({
   }
 
   useEffect(() => {
-    if (!autoPreRender || !autoPlayAfterRender) return;
+    if (!autoPlayAfterRender) return;
     if (!audioUrl) return;
     if (autoPlayFiredForUrl.current === audioUrl) return;
     const audio = audioRef.current;
@@ -95,7 +104,14 @@ export function ChatSpeechRenderButton({
     }
 
     setPlaybackStatus("Autoplay started.");
-  }, [audioUrl, autoPreRender, autoPlayAfterRender]);
+  }, [audioUrl, autoPlayAfterRender]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.muted = isMuted;
+    audio.volume = Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.6;
+  }, [audioUrl, isMuted, volume]);
 
   useEffect(() => {
     if (!autoPreRender) return;
@@ -120,8 +136,20 @@ export function ChatSpeechRenderButton({
       {playbackStatus !== null && (
         <p className="mt-1 text-xs text-amber-600">{playbackStatus}</p>
       )}
+      {isDev && renderResult !== null && (
+        <div className="mt-1 text-[10px] leading-4 text-gray-500">
+          <div>render_url: {renderEndpoint}</div>
+          <div>engine: {renderResult.render_engine ?? "n/a"}</div>
+          <div>rendered: {String(renderResult.rendered)}</div>
+          <div>status: {renderResult.status}</div>
+          <div>audio_url: {renderResult.audio_url ?? "n/a"}</div>
+          <div>error: {renderResult.error ?? "none"}</div>
+          <div>autoplay_enabled: {String(autoPlayAfterRender)}</div>
+          <div>muted: {String(isMuted)} volume: {Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.6}</div>
+        </div>
+      )}
       {audioUrl !== null && (
-        <audio ref={audioRef} controls src={audioUrl} className="mt-1 w-full max-w-xs" />
+        <audio key={audioUrl} ref={audioRef} controls src={audioUrl} className="mt-1 w-full max-w-xs" />
       )}
     </div>
   );

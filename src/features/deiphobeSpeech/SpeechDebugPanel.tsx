@@ -1,12 +1,15 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { resolveAnimationStatePath } from "../vrmViewer/animationState";
 import { mockSpeechPayload, type SpeechDebugPayload } from "./mockSpeechPayload";
+import { SPEECH_RENDER_ENDPOINT, type SpeechRenderResult } from "./renderBridge";
+import {
+  readSpeechPlaybackMuted,
+  readSpeechPlaybackVolume,
+} from "./playbackSettings";
 
 const SPEECH_DEBUG_ENDPOINT =
   process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_DEBUG_BRIDGE_URL ?? "/debug/deiphobe_speech_payload";
-const SPEECH_RENDER_ENDPOINT =
-  process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_RENDER_BRIDGE_URL ?? "/debug/deiphobe_speech_render";
 const DEFAULT_RENDER_OUTPUT = "/tmp/deiphobe-speech-test/debug.wav";
 const RENDER_OUTPUT_FILENAME = "deiphobe-debug-render.wav";
 
@@ -23,16 +26,6 @@ const VOICE_POSTURE_OPTIONS = [
   "private_memory",
   "neutral",
 ] as const;
-
-type RenderResult = {
-  rendered: boolean;
-  status: string;
-  content_type?: string | null;
-  bytes_received?: number | null;
-  output_path?: string | null;
-  error?: string | null;
-  audio_url?: string | null;
-};
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -122,14 +115,17 @@ export function SpeechDebugPanel({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isFetching, setIsFetching] = useState(false);
   const [isRendering, setIsRendering] = useState(false);
-  const [renderResult, setRenderResult] = useState<RenderResult | null>(null);
+  const [renderResult, setRenderResult] = useState<SpeechRenderResult | null>(null);
   const [renderStatusMessage, setRenderStatusMessage] = useState<string | null>(null);
   const [isCueing, setIsCueing] = useState(false);
   const [cueStatusMessage, setCueStatusMessage] = useState<string | null>(null);
   const [postureOverride, setPostureOverride] = useState<string>("");
   const [resolvedAnimPath, setResolvedAnimPath] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const effectiveVoiceMode = postureOverride || currentPayload.avatar_cues.voice_mode;
+  const isMuted = readSpeechPlaybackMuted();
+  const volume = readSpeechPlaybackVolume();
 
   const renderRequest = currentPayload.piper_render_request;
   const renderCommandPreview = useMemo(
@@ -247,7 +243,7 @@ export function SpeechDebugPanel({
         throw new Error(body.trim() || `Speech render bridge request failed (${response.status})`);
       }
 
-      const result = (await response.json()) as RenderResult;
+      const result = (await response.json()) as SpeechRenderResult;
       setRenderResult(result);
     } catch (error) {
       setRenderStatusMessage(
@@ -262,6 +258,13 @@ export function SpeechDebugPanel({
     await renderAudio();
     await dispatchAvatarCue();
   }
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.muted = isMuted;
+    audio.volume = Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.6;
+  }, [renderResult?.audio_url, isMuted, volume]);
 
   const isBusy = isFetching || isRendering || isCueing;
 
@@ -435,12 +438,20 @@ export function SpeechDebugPanel({
               {renderResult.output_path ? (
                 <KeyValue label="output_path" value={renderResult.output_path} />
               ) : null}
+              {renderResult.render_engine ? (
+                <KeyValue label="render_engine" value={renderResult.render_engine} />
+              ) : null}
+              <KeyValue label="render_url" value={SPEECH_RENDER_ENDPOINT} />
+              <KeyValue
+                label="audio_volume"
+                value={`${Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.6} muted=${String(isMuted)}`}
+              />
               {renderResult.error ? (
                 <KeyValue label="error" value={renderResult.error} />
               ) : null}
               {renderResult.audio_url ? (
                 <div className="pt-1">
-                  <audio controls src={renderResult.audio_url} />
+                  <audio key={renderResult.audio_url} ref={audioRef} controls src={renderResult.audio_url} />
                 </div>
               ) : null}
             </div>

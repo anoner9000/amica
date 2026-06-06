@@ -201,8 +201,9 @@ export default function Home() {
   }, [viewer, videoRef, showStreamWindow]);
 
   function toggleTTSMute() {
-    updateConfig('tts_muted', config('tts_muted') === 'true' ? 'false' : 'true')
-    setMuted(config('tts_muted') === 'true')
+    const nextMuted = config("tts_muted") !== "true";
+    updateConfig("tts_muted", nextMuted ? "true" : "false");
+    setMuted(nextMuted);
   }
 
   function updateVoiceVolume(value: string) {
