@@ -97,6 +97,13 @@ export function stopSmartChunkPlayback(): void {
   }
 }
 
+function _makeAudio(url: string): HTMLAudioElement {
+  const audio = new Audio(url);
+  audio.preload = "auto";
+  audio.volume = readCurrentVolume();
+  return audio;
+}
+
 export async function playSmartChunks(
   audioUrls: string[],
   onStatus: (s: SmartChunkStatus) => void,
@@ -112,14 +119,21 @@ export async function playSmartChunks(
   onStatus("playing");
   startVolumePoller();
 
-  for (const url of audioUrls) {
+  // Pre-buffer the first chunk immediately so it's ready when the loop starts.
+  let prefetched: HTMLAudioElement | null = _makeAudio(audioUrls[0]);
+
+  for (let i = 0; i < audioUrls.length; i++) {
     if (_sessionId !== mySessionId) { stopVolumePoller(); return; }
 
-    await new Promise<void>((resolve) => {
-      const audio = new Audio(url);
-      audio.volume = readCurrentVolume();
-      _currentAudio = audio;
+    // Grab the pre-buffered element for this index (or create fresh on first iteration).
+    const audio = prefetched ?? _makeAudio(audioUrls[i]);
+    audio.volume = readCurrentVolume();
+    _currentAudio = audio;
 
+    // Start pre-buffering the next chunk while this one plays.
+    prefetched = i + 1 < audioUrls.length ? _makeAudio(audioUrls[i + 1]) : null;
+
+    await new Promise<void>((resolve) => {
       const done = () => {
         if (_currentAudio === audio) _currentAudio = null;
         resolve();
