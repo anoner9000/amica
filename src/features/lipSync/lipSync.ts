@@ -1,13 +1,20 @@
 import { LipSyncAnalyzeResult } from "./lipSyncAnalyzeResult";
 import { resolveVoiceVolume } from "@/utils/voiceVolume";
+import { config } from "@/utils/config";
 
 const TIME_DOMAIN_DATA_LENGTH = 2048;
+
+function readLipSyncParam(key: string, fallback: number): number {
+  const v = parseFloat(config(key as Parameters<typeof config>[0]) ?? String(fallback));
+  return isFinite(v) ? v : fallback;
+}
 
 export class LipSync {
   public readonly audio: AudioContext;
   public readonly analyser: AnalyserNode;
   public readonly timeDomainData: Float32Array;
   private _currentSource: AudioBufferSourceNode | null = null;
+  private _prevSmoothed: number = 0;
 
   public constructor(audio: AudioContext) {
     this.audio = audio;
@@ -19,18 +26,32 @@ export class LipSync {
   public update(): LipSyncAnalyzeResult {
     this.analyser.getFloatTimeDomainData(this.timeDomainData);
 
-    let volume = 0.0;
+    let peak = 0.0;
     for (let i = 0; i < TIME_DOMAIN_DATA_LENGTH; i++) {
-      volume = Math.max(volume, Math.abs(this.timeDomainData[i]));
+      peak = Math.max(peak, Math.abs(this.timeDomainData[i]));
     }
 
-    // cook
-    volume = 1 / (1 + Math.exp(-45 * volume + 5));
-    if (volume < 0.1) volume = 0;
+    // Sigmoid shaping (original curve)
+    let volume = 1 / (1 + Math.exp(-45 * peak + 5));
 
-    return {
-      volume,
-    };
+    const gain = readLipSyncParam("deiphobe_lipsync_gain", 2.5);
+    const silenceThreshold = readLipSyncParam("deiphobe_lipsync_silence_threshold", 0.015);
+    const smoothing = readLipSyncParam("deiphobe_lipsync_smoothing", 0.25);
+    const minOpen = readLipSyncParam("deiphobe_lipsync_min_open", 0.03);
+    const maxOpen = readLipSyncParam("deiphobe_lipsync_max_open", 0.85);
+
+    volume *= gain;
+
+    if (peak < silenceThreshold) {
+      volume = 0;
+      this._prevSmoothed = 0;
+    } else {
+      volume = smoothing * this._prevSmoothed + (1 - smoothing) * volume;
+      this._prevSmoothed = volume;
+      volume = Math.max(minOpen, Math.min(maxOpen, volume));
+    }
+
+    return { volume };
   }
 
   public async playFromArrayBuffer(buffer: ArrayBuffer, onEnded?: () => void, volume = 1) {
@@ -61,6 +82,12 @@ export class LipSync {
       try { this._currentSource.stop(); } catch (_) {}
       this._currentSource = null;
     }
+  }
+
+  public reset(): void {
+    this.stopCurrent();
+    this.timeDomainData.fill(0);
+    this._prevSmoothed = 0;
   }
 
   public async playFromURL(url: string, onEnded?: () => void) {
