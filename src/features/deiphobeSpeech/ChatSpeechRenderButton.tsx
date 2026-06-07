@@ -6,9 +6,11 @@ import {
   type SpeechRenderResult,
 } from "./renderBridge";
 import {
-  readSpeechPlaybackMuted,
-  readSpeechPlaybackVolume,
-} from "./playbackSettings";
+  playDeiphobeSpeechUrls,
+  stopDeiphobeSpeechPlayback,
+  type DeiphobeSpeechPlaybackMetadata,
+} from "./deiphobeSpeechPlaybackManager";
+import type { LipSync } from "@/features/lipSync/lipSync";
 
 export function ChatSpeechRenderButton({
   text,
@@ -17,6 +19,9 @@ export function ChatSpeechRenderButton({
   renderEndpoint = SPEECH_RENDER_ENDPOINT,
   autoPreRender = false,
   autoPlayAfterRender = false,
+  ownerId,
+  lipSync,
+  onMetadataChange,
 }: {
   text: string;
   voice_posture?: string;
@@ -24,6 +29,9 @@ export function ChatSpeechRenderButton({
   renderEndpoint?: string;
   autoPreRender?: boolean;
   autoPlayAfterRender?: boolean;
+  ownerId: string;
+  lipSync?: LipSync;
+  onMetadataChange?: (metadata: DeiphobeSpeechPlaybackMetadata | null) => void;
 }) {
   const [isRendering, setIsRendering] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -31,13 +39,40 @@ export function ChatSpeechRenderButton({
   const [playbackStatus, setPlaybackStatus] = useState<string | null>(null);
   const [renderResult, setRenderResult] = useState<SpeechRenderResult | null>(null);
   const preRenderFired = useRef(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const autoPlayFiredForUrl = useRef<string | null>(null);
 
   const effectivePosture =
     (voice_posture ?? "").trim() || (animation_state ?? "").trim() || "neutral";
-  const isMuted = readSpeechPlaybackMuted();
-  const volume = readSpeechPlaybackVolume();
+  function buildPlaybackMetadata(data: SpeechRenderResult): DeiphobeSpeechPlaybackMetadata {
+    const renderEngine = data.render_engine ?? null;
+    const renderMode = data.render_mode ?? (renderEngine === "piper" ? "piper" : "single_file");
+    return {
+      render_engine: renderEngine,
+      profile: data.voice_profile ?? undefined,
+      endpoint: renderEndpoint,
+      mode: renderMode,
+      fallback_used: Boolean(data.fallback_used),
+    };
+  }
+
+  async function playRenderedAudio(url: string, metadata: DeiphobeSpeechPlaybackMetadata) {
+    setPlaybackStatus(null);
+    const result = await playDeiphobeSpeechUrls([url], {
+      ownerId,
+      lipSync,
+      metadata,
+      onStatus: (status) => {
+        if (status === "playing") setPlaybackStatus("Speaking…");
+        if (status === "complete") setPlaybackStatus("Voice complete");
+        if (status === "error") setPlaybackStatus("Voice unavailable");
+      },
+    });
+    if (result.outcome === "blocked") {
+      setPlaybackStatus("Autoplay blocked by browser. Press play manually.");
+    } else if (result.outcome === "cancelled") {
+      setPlaybackStatus("Voice cancelled.");
+    }
+  }
 
   async function handleRender() {
     if (isRendering) return;
@@ -53,6 +88,7 @@ export function ChatSpeechRenderButton({
         renderEndpoint,
       );
       setRenderResult(data);
+      onMetadataChange?.(buildPlaybackMetadata(data));
       if (data.rendered && data.audio_url) {
         setAudioUrl(data.audio_url);
       } else if (data.rendered) {
@@ -70,41 +106,12 @@ export function ChatSpeechRenderButton({
   useEffect(() => {
     if (!autoPlayAfterRender) return;
     if (!audioUrl) return;
+    if (!renderResult) return;
     if (autoPlayFiredForUrl.current === audioUrl) return;
-    const audio = audioRef.current;
-    if (!audio) return;
 
     autoPlayFiredForUrl.current = audioUrl;
-    setPlaybackStatus(null);
-
-    let playback: Promise<void> | undefined;
-    try {
-      playback = audio.play();
-    } catch (error: any) {
-      setPlaybackStatus("Autoplay blocked by browser. Press play manually.");
-      return;
-    }
-
-    if (playback && typeof playback.then === "function") {
-      void playback
-        .then(() => {
-          setPlaybackStatus("Autoplay started.");
-        })
-        .catch(() => {
-          setPlaybackStatus("Autoplay blocked by browser. Press play manually.");
-        });
-      return;
-    }
-
-    setPlaybackStatus("Autoplay started.");
-  }, [audioUrl, autoPlayAfterRender]);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.muted = isMuted;
-    audio.volume = Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.6;
-  }, [audioUrl, isMuted, volume]);
+    void playRenderedAudio(audioUrl, buildPlaybackMetadata(renderResult));
+  }, [audioUrl, autoPlayAfterRender, renderResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!autoPreRender) return;
@@ -112,6 +119,13 @@ export function ChatSpeechRenderButton({
     preRenderFired.current = true;
     void handleRender();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    return () => {
+      stopDeiphobeSpeechPlayback(ownerId);
+      onMetadataChange?.(null);
+    };
+  }, [ownerId, onMetadataChange]);
 
   return (
     <div className="mt-1">
@@ -134,10 +148,13 @@ export function ChatSpeechRenderButton({
       {playbackStatus !== null && (
         <p className="mt-1 text-xs text-amber-600">{playbackStatus}</p>
       )}
-      {playbackStatus !== null && playbackStatus.includes("blocked") && audioUrl !== null && (
+      {audioUrl !== null && (
         <button
           type="button"
-          onClick={() => { void audioRef.current?.play(); }}
+          onClick={() => {
+            if (!renderResult) return;
+            void playRenderedAudio(audioUrl, buildPlaybackMetadata(renderResult));
+          }}
           className="mt-1 text-xs text-blue-600 hover:text-blue-800"
         >
           ▶ Play voice
@@ -147,14 +164,12 @@ export function ChatSpeechRenderButton({
         <div className="mt-1 text-[10px] leading-4 text-gray-500">
           <div>bridge: {renderEndpoint}</div>
           <div>engine: {renderResult.render_engine ?? "n/a"} | rendered: {String(renderResult.rendered)} | status: {renderResult.status}</div>
+          <div>profile: {renderResult.voice_profile ?? "n/a"} | mode: {renderResult.render_mode ?? "single_file"}</div>
           <div>audio_url: {renderResult.audio_url ? "present" : "missing"} | bytes: {renderResult.bytes_received ?? "n/a"}</div>
           {renderResult.error ? <div>error: {renderResult.error}</div> : null}
-          <div>autoplay: {String(autoPlayAfterRender)} | muted: {String(isMuted)} | vol: {Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.6}</div>
+          <div>autoplay: {String(autoPlayAfterRender)}</div>
           {playbackStatus ? <div>play_state: {playbackStatus}</div> : null}
         </div>
-      )}
-      {audioUrl !== null && (
-        <audio key={audioUrl} ref={audioRef} controls src={audioUrl} className="mt-1 w-full max-w-xs" />
       )}
     </div>
   );
