@@ -3,8 +3,12 @@
  * Dev-only. Does not affect chat content, reply text, or deiphobe_chat.py.
  */
 
-import { readSpeechPlaybackMuted, readSpeechPlaybackVolume } from "./playbackSettings";
 import type { LipSync } from "@/features/lipSync/lipSync";
+import {
+  playDeiphobeSpeechUrls,
+  stopDeiphobeSpeechPlayback,
+  type DeiphobeSpeechPlaybackMetadata,
+} from "./deiphobeSpeechPlaybackManager";
 
 export type SmartChunkStatus =
   | "idle"
@@ -14,50 +18,35 @@ export type SmartChunkStatus =
   | "complete"
   | "error";
 
+export type SmartChunkChunkMeta = {
+  index: number;
+  render_engine?: string;
+  voice_profile?: string;
+  model_id?: string;
+  render_mode?: string;
+  batch_id?: string;
+  instruct_hash?: string;
+  instruct_preview?: string;
+};
+
 export type SmartChunkRenderResult = {
   ok: boolean;
   audioUrls: string[];
   chunkCount: number;
+  renderEngine?: string;
+  voiceProfile?: string;
+  renderMode?: string;
+  batchId?: string;
+  instructHash?: string;
+  endpoint: string;
+  mode: "smart_chunks";
+  chunkMeta?: SmartChunkChunkMeta[];
   error?: string;
 };
 
 const SMART_CHUNKS_ENDPOINT =
   process.env.NEXT_PUBLIC_DEIPHOBE_SMART_CHUNKS_URL ??
   "http://127.0.0.1:8771/debug/render_smart_chunks";
-
-// ── singleton session ─────────────────────────────────────────────────────────
-// sessionId increments on every stop/new-play so stale async loops exit cleanly.
-let _sessionId = 0;
-let _currentAudio: HTMLAudioElement | null = null;
-let _volumePoller: ReturnType<typeof setInterval> | null = null;
-let _currentLipSync: LipSync | null = null;
-
-// Perceptual loudness: power-curve so mid-slider is actually mid-loudness.
-function applyVolumeCurve(raw: number): number {
-  return Math.pow(raw, 2);
-}
-
-function readCurrentVolume(): number {
-  const muted = readSpeechPlaybackMuted();
-  if (muted) return 0;
-  return applyVolumeCurve(readSpeechPlaybackVolume());
-}
-
-function startVolumePoller(): void {
-  stopVolumePoller();
-  _volumePoller = setInterval(() => {
-    if (_currentAudio) {
-      _currentAudio.volume = readCurrentVolume();
-    }
-  }, 100);
-}
-
-function stopVolumePoller(): void {
-  if (_volumePoller !== null) {
-    clearInterval(_volumePoller);
-    _volumePoller = null;
-  }
-}
 
 export async function callSmartChunkRender(
   text: string,
@@ -71,150 +60,103 @@ export async function callSmartChunkRender(
       body: JSON.stringify({ text }),
     });
     if (!resp.ok) {
-      return { ok: false, audioUrls: [], chunkCount: 0, error: `HTTP ${resp.status}` };
+      return {
+        ok: false,
+        audioUrls: [],
+        chunkCount: 0,
+        endpoint,
+        mode: "smart_chunks",
+        error: `HTTP ${resp.status}`,
+      };
     }
     const data: {
       ok: boolean;
-      chunks?: Array<{ audio_url: string }>;
+      engine?: string;
+      render_engine?: string;
+      voice_profile?: string;
+      render_mode?: string;
+      batch_id?: string;
+      instruct_hash?: string;
+      mode?: "smart_chunks";
+      chunks?: Array<{
+        audio_url: string;
+        index?: number;
+        render_engine?: string;
+        voice_profile?: string;
+        model_id?: string;
+        render_mode?: string;
+        batch_id?: string;
+        instruct_hash?: string;
+        instruct_preview?: string;
+      }>;
       chunk_count?: number;
       error?: string;
     } = await resp.json();
     if (!data.ok) {
-      return { ok: false, audioUrls: [], chunkCount: 0, error: data.error ?? "render failed" };
+      return {
+        ok: false,
+        audioUrls: [],
+        chunkCount: 0,
+        renderEngine: data.render_engine ?? data.engine,
+        voiceProfile: data.voice_profile ?? "deiphobe_voicedesign_v1",
+        endpoint,
+        mode: "smart_chunks",
+        error: data.error ?? "render failed",
+      };
     }
-    const audioUrls = (data.chunks ?? []).map((c) => c.audio_url);
-    return { ok: true, audioUrls, chunkCount: data.chunk_count ?? audioUrls.length };
+    const rawChunks = data.chunks ?? [];
+
+    // Reject mixed-engine responses — never silently mix Qwen3 and other engines.
+    const engines = new Set(rawChunks.map((c) => c.render_engine).filter(Boolean));
+    if (engines.size > 1) {
+      return {
+        ok: false,
+        audioUrls: [],
+        chunkCount: 0,
+        endpoint,
+        mode: "smart_chunks",
+        error: `mixed render_engine across chunks: ${[...engines].join(", ")}`,
+      };
+    }
+
+    const audioUrls = rawChunks.map((c) => c.audio_url);
+    const chunkMeta: SmartChunkChunkMeta[] = rawChunks.map((c, i) => ({
+      index: c.index ?? i,
+      render_engine: c.render_engine,
+      voice_profile: c.voice_profile,
+      model_id: c.model_id,
+      render_mode: c.render_mode,
+      batch_id: c.batch_id,
+      instruct_hash: c.instruct_hash,
+      instruct_preview: c.instruct_preview,
+    }));
+    return {
+      ok: true,
+      audioUrls,
+      chunkCount: data.chunk_count ?? audioUrls.length,
+      renderEngine: data.render_engine ?? data.engine ?? "qwen3_voice_design",
+      voiceProfile: data.voice_profile ?? "deiphobe_voicedesign_v1",
+      renderMode: data.render_mode,
+      batchId: data.batch_id,
+      instructHash: data.instruct_hash,
+      endpoint,
+      mode: "smart_chunks",
+      chunkMeta,
+    };
   } catch (err) {
-    return { ok: false, audioUrls: [], chunkCount: 0, error: String(err) };
+    return {
+      ok: false,
+      audioUrls: [],
+      chunkCount: 0,
+      endpoint,
+      mode: "smart_chunks",
+      error: String(err),
+    };
   }
 }
 
 export function stopSmartChunkPlayback(): void {
-  _sessionId++;
-  stopVolumePoller();
-  if (_currentAudio) {
-    try { _currentAudio.pause(); } catch (_) {}
-    _currentAudio.src = "";
-    _currentAudio = null;
-  }
-  if (_currentLipSync) {
-    _currentLipSync.stopCurrent();
-    _currentLipSync = null;
-  }
-}
-
-function _makeAudio(url: string): HTMLAudioElement {
-  const audio = new Audio(url);
-  audio.preload = "auto";
-  audio.volume = readCurrentVolume();
-  return audio;
-}
-
-async function _fetchBuffer(url: string): Promise<ArrayBuffer> {
-  const resp = await fetch(url);
-  return resp.arrayBuffer();
-}
-
-// ── LipSync path ──────────────────────────────────────────────────────────────
-// Routes audio through the model's AudioContext + AnalyserNode so the avatar
-// mouth moves during playback. Requires CORS headers on the audio server
-// (the Qwen3 VoiceDesign server already sets Access-Control-Allow-Origin: *).
-
-async function _playWithLipSync(
-  audioUrls: string[],
-  onStatus: (s: SmartChunkStatus) => void,
-  lipSync: LipSync,
-  mySessionId: number,
-): Promise<void> {
-  // Resume AudioContext if the browser auto-suspended it.
-  if (lipSync.audio.state === "suspended") {
-    try { await lipSync.audio.resume(); } catch (_) {}
-  }
-
-  onStatus("playing");
-
-  // Pre-fetch the first chunk immediately.
-  let prefetched: Promise<ArrayBuffer> = _fetchBuffer(audioUrls[0]);
-
-  for (let i = 0; i < audioUrls.length; i++) {
-    if (_sessionId !== mySessionId) return;
-
-    let buffer: ArrayBuffer;
-    try {
-      buffer = await prefetched;
-    } catch {
-      if (_sessionId === mySessionId) onStatus("error");
-      return;
-    }
-
-    if (_sessionId !== mySessionId) return;
-
-    // Pre-fetch next chunk while this one plays.
-    prefetched = i + 1 < audioUrls.length
-      ? _fetchBuffer(audioUrls[i + 1])
-      : Promise.resolve(new ArrayBuffer(0));
-
-    await new Promise<void>((resolve) => {
-      const done = () => resolve();
-      lipSync.playFromArrayBuffer(buffer, done, readCurrentVolume()).catch(() => {
-        if (_sessionId === mySessionId) onStatus("error");
-        resolve();
-      });
-    });
-  }
-
-  if (_sessionId === mySessionId) {
-    _currentLipSync = null;
-    onStatus("complete");
-  }
-}
-
-// ── HTML audio fallback ───────────────────────────────────────────────────────
-// Used when no LipSync is available. No mouth movement, but audio still plays.
-
-async function _playWithAudio(
-  audioUrls: string[],
-  onStatus: (s: SmartChunkStatus) => void,
-  mySessionId: number,
-): Promise<void> {
-  onStatus("playing");
-  startVolumePoller();
-
-  let prefetched: HTMLAudioElement | null = _makeAudio(audioUrls[0]);
-
-  for (let i = 0; i < audioUrls.length; i++) {
-    if (_sessionId !== mySessionId) { stopVolumePoller(); return; }
-
-    const audio = prefetched ?? _makeAudio(audioUrls[i]);
-    audio.volume = readCurrentVolume();
-    _currentAudio = audio;
-
-    prefetched = i + 1 < audioUrls.length ? _makeAudio(audioUrls[i + 1]) : null;
-
-    await new Promise<void>((resolve) => {
-      const done = () => {
-        if (_currentAudio === audio) _currentAudio = null;
-        resolve();
-      };
-
-      audio.addEventListener("ended", done);
-      audio.addEventListener("error", done);
-
-      const playPromise = audio.play();
-      if (playPromise && typeof playPromise.then === "function") {
-        playPromise.catch(() => {
-          onStatus("error");
-          done();
-        });
-      }
-    });
-  }
-
-  if (_sessionId === mySessionId) {
-    stopVolumePoller();
-    _currentAudio = null;
-    onStatus("complete");
-  }
+  stopDeiphobeSpeechPlayback();
 }
 
 // ── public API ────────────────────────────────────────────────────────────────
@@ -223,19 +165,16 @@ export async function playSmartChunks(
   audioUrls: string[],
   onStatus: (s: SmartChunkStatus) => void,
   lipSync?: LipSync,
+  metadata?: DeiphobeSpeechPlaybackMetadata,
 ): Promise<void> {
-  stopSmartChunkPlayback();
-  const mySessionId = _sessionId;
-
   if (audioUrls.length === 0) {
     onStatus("complete");
     return;
   }
-
-  if (lipSync) {
-    _currentLipSync = lipSync;
-    await _playWithLipSync(audioUrls, onStatus, lipSync, mySessionId);
-  } else {
-    await _playWithAudio(audioUrls, onStatus, mySessionId);
-  }
+  await playDeiphobeSpeechUrls(audioUrls, {
+    ownerId: metadata?.endpoint ?? "smart_chunks",
+    lipSync,
+    metadata,
+    onStatus,
+  });
 }

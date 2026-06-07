@@ -12,6 +12,12 @@ import {
   stopSmartChunkPlayback,
   type SmartChunkStatus,
 } from "@/features/deiphobeSpeech/smartChunkSpeech";
+import {
+  callSpeechRenderBridge,
+  makeUniqueSpeechOutputFilename,
+  SPEECH_RENDER_ENDPOINT,
+} from "@/features/deiphobeSpeech/renderBridge";
+import type { DeiphobeSpeechPlaybackMetadata } from "@/features/deiphobeSpeech/deiphobeSpeechPlaybackManager";
 import { ViewerContext } from "@/features/vrmViewer/viewerContext";
 import { resolveAnimationStatePath } from "@/features/vrmViewer/animationState";
 import { loadVRMAnimation } from "@/lib/VRMAnimation/loadVRMAnimation";
@@ -44,6 +50,8 @@ export const ChatLog = ({
     config("deiphobe_speech_auto_render_enabled") === "true";
   const autoPlayEnabled =
     config("deiphobe_speech_auto_play_enabled") === "true";
+  const smartChunksEnabled =
+    config("deiphobe_speech_smart_chunks_enabled") === "true";
 
   // Index of the last assistant message in the list.
   const newestAssistantIdx = messages.reduce<number>(
@@ -181,6 +189,14 @@ export const ChatLog = ({
             // never for private_memory, never for user messages.
             const autoSmartRender =
               autoRenderEnabled &&
+              smartChunksEnabled &&
+              msg.role === "assistant" &&
+              msg.voice_posture !== "private_memory" &&
+              i === newestAssistantIdx;
+
+            const autoBridgeRender =
+              autoRenderEnabled &&
+              !smartChunksEnabled &&
               msg.role === "assistant" &&
               msg.voice_posture !== "private_memory" &&
               i === newestAssistantIdx;
@@ -199,6 +215,7 @@ export const ChatLog = ({
                   autoPlayAfterRender={autoPlayAfterRender}
                   speechControlsEnabled={speechChatControlsEnabled}
                   autoSmartRender={autoSmartRender}
+                  autoBridgeRender={autoBridgeRender}
                   autoSmartPlay={autoPlayEnabled}
                   lipSync={viewer?.model?._lipSync}
                 />
@@ -231,6 +248,7 @@ function Chat({
   autoPlayAfterRender = false,
   speechControlsEnabled = false,
   autoSmartRender = false,
+  autoBridgeRender = false,
   autoSmartPlay = false,
   lipSync,
 }: {
@@ -245,6 +263,7 @@ function Chat({
   autoPlayAfterRender?: boolean;
   speechControlsEnabled?: boolean;
   autoSmartRender?: boolean;
+  autoBridgeRender?: boolean;
   autoSmartPlay?: boolean;
   lipSync?: import("@/features/lipSync/lipSync").LipSync;
 }) {
@@ -252,31 +271,39 @@ function Chat({
 
   // ── smart-chunk render/play state ─────────────────────────────────────────
   const [smartStatus, setSmartStatus] = useState<SmartChunkStatus>("idle");
+  const [speechMetadata, setSpeechMetadata] = useState<DeiphobeSpeechPlaybackMetadata | null>(null);
+  const speechOwnerId = `deiphobe-message-${num}`;
 
   // Refs so async handlers can read the latest prop values without going stale.
   const autoSmartRenderRef = useRef(autoSmartRender);
+  const autoBridgeRenderRef = useRef(autoBridgeRender);
   const autoSmartPlayRef = useRef(autoSmartPlay);
   const messageRef = useRef(message);
   useEffect(() => { autoSmartRenderRef.current = autoSmartRender; }, [autoSmartRender]);
+  useEffect(() => { autoBridgeRenderRef.current = autoBridgeRender; }, [autoBridgeRender]);
   useEffect(() => { autoSmartPlayRef.current = autoSmartPlay; }, [autoSmartPlay]);
   useEffect(() => { messageRef.current = message; }, [message]);
 
-  // Track the previous autoSmartRender value to detect true→false transitions.
-  const prevAutoSmartRenderRef = useRef(false);
-  // Guard: fire render at most once per "this is the newest message" period.
+  // Track whether any auto-render is active to detect true→false transitions.
+  const autoRenderActive = autoSmartRender || autoBridgeRender;
+  const prevAutoRenderActiveRef = useRef(false);
+  // Guards: fire each render path at most once per "newest message" period.
   const smartRenderFiredRef = useRef(false);
+  const bridgeRenderFiredRef = useRef(false);
 
-  // Cancel playback when this message is no longer the newest (autoSmartRender: true→false).
+  // Cancel playback when this message is no longer the newest.
   useEffect(() => {
-    const wasNewest = prevAutoSmartRenderRef.current;
-    prevAutoSmartRenderRef.current = autoSmartRender;
+    const wasActive = prevAutoRenderActiveRef.current;
+    prevAutoRenderActiveRef.current = autoRenderActive;
 
-    if (wasNewest && !autoSmartRender) {
+    if (wasActive && !autoRenderActive) {
       stopSmartChunkPlayback();
       setSmartStatus("idle");
+      setSpeechMetadata(null);
       smartRenderFiredRef.current = false;
+      bridgeRenderFiredRef.current = false;
     }
-  }, [autoSmartRender]);
+  }, [autoRenderActive]);
 
   // Auto-render + optional auto-play for the newest assistant message.
   useEffect(() => {
@@ -294,18 +321,79 @@ function Chat({
         return;
       }
 
+      const playbackMeta = {
+        render_engine: result.renderEngine,
+        profile: result.voiceProfile ?? undefined,
+        endpoint: result.endpoint,
+        mode: result.mode,
+        chunk_count: result.chunkCount,
+        batch_id: result.batchId,
+        instruct_hash: result.instructHash,
+        render_mode: result.renderMode,
+      };
+      setSpeechMetadata(playbackMeta);
+
       if (!result.ok) {
         setSmartStatus("error");
         return;
       }
-
       setSmartStatus("ready");
 
       if (autoSmartPlayRef.current && result.audioUrls.length > 0) {
-        await playSmartChunks(result.audioUrls, setSmartStatus, lipSync);
+        await playSmartChunks(
+          result.audioUrls,
+          setSmartStatus,
+          lipSync,
+          playbackMeta,
+        );
       }
     })();
   }, [autoSmartRender, role]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Bridge auto-render for newest assistant message (smart-chunks disabled path).
+  useEffect(() => {
+    if (!autoBridgeRender || role !== "assistant") return;
+    if (bridgeRenderFiredRef.current) return;
+    bridgeRenderFiredRef.current = true;
+
+    void (async () => {
+      setSmartStatus("rendering");
+      try {
+        const outputFilename = makeUniqueSpeechOutputFilename("auto", messageRef.current);
+        const result = await callSpeechRenderBridge({
+          text: messageRef.current,
+          posture: "neutral",
+          output_filename: outputFilename,
+        });
+
+        if (!autoBridgeRenderRef.current) {
+          setSmartStatus("idle");
+          return;
+        }
+
+        const playbackMeta: DeiphobeSpeechPlaybackMetadata = {
+          render_engine: result.render_engine ?? undefined,
+          profile: result.voice_profile ?? undefined,
+          endpoint: SPEECH_RENDER_ENDPOINT,
+          mode: result.render_mode ?? "single_file",
+          render_mode: result.render_mode ?? undefined,
+        };
+        setSpeechMetadata(playbackMeta);
+
+        if (!result.rendered || !result.audio_url) {
+          setSmartStatus("error");
+          return;
+        }
+        setSmartStatus("ready");
+
+        if (autoSmartPlayRef.current) {
+          await playSmartChunks([result.audio_url], setSmartStatus, lipSync, playbackMeta);
+        }
+      } catch {
+        if (autoBridgeRenderRef.current) setSmartStatus("error");
+      }
+    })();
+  }, [autoBridgeRender, role]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── render ────────────────────────────────────────────────────────────────
 
@@ -345,10 +433,39 @@ function Chat({
             <>
               <div>{message}</div>
               {speechControlsEnabled && (
-                <ChatSpeechRenderButton text={message} voice_posture={voice_posture} animation_state={animation_state} autoPreRender={autoPreRender} autoPlayAfterRender={autoPlayAfterRender} />
+                <ChatSpeechRenderButton
+                  text={message}
+                  voice_posture={voice_posture}
+                  animation_state={animation_state}
+                  autoPreRender={autoPreRender}
+                  autoPlayAfterRender={autoPlayAfterRender}
+                  ownerId={speechOwnerId}
+                  lipSync={lipSync}
+                  onMetadataChange={setSpeechMetadata}
+                />
               )}
               {speechControlsEnabled && (
                 <ChatAvatarCueButton voice_posture={voice_posture} animation_state={animation_state} onDispatchCue={onDispatchCue} />
+              )}
+              {speechMetadata !== null && (
+                <div className="mt-1 text-[10px] leading-4 text-gray-500" data-testid={`speech-meta-${num}`}>
+                  <div>speech_engine: {speechMetadata.render_engine ?? "n/a"}</div>
+                  <div>speech_profile: {speechMetadata.profile ?? "n/a"}</div>
+                  <div>speech_endpoint: {speechMetadata.endpoint ?? "n/a"}</div>
+                  <div>speech_mode: {speechMetadata.mode}</div>
+                  {speechMetadata.chunk_count != null && (
+                    <div>chunk_count: {speechMetadata.chunk_count}</div>
+                  )}
+                  {speechMetadata.render_mode != null && (
+                    <div>render_mode: {speechMetadata.render_mode}</div>
+                  )}
+                  {speechMetadata.batch_id != null && (
+                    <div>batch_id: {speechMetadata.batch_id}</div>
+                  )}
+                  {speechMetadata.instruct_hash != null && (
+                    <div>instruct_hash: {speechMetadata.instruct_hash}</div>
+                  )}
+                </div>
               )}
               {smartStatus !== "idle" && (
                 <SmartChunkStatusBar

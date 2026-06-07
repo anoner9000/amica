@@ -4,7 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AMICA_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CLAWDAWG_ROOT="$(cd "$AMICA_ROOT/.." && pwd)"
-VOICE_CONTROL="$CLAWDAWG_ROOT/ops/scripts/deiphobe/qwen3_voicedesign_control.sh"
 AMICA_URL="http://127.0.0.1:3000"
 BRIDGE_HEALTH_URL="http://127.0.0.1:8767/health"
 ENV_FILE="$AMICA_ROOT/.env.local"
@@ -27,19 +26,12 @@ check_http() {
 require_environment() {
   [[ -d "$AMICA_ROOT" ]] || die "Amica root missing: $AMICA_ROOT"
   [[ -f "$ENV_FILE" ]] || die ".env.local missing: $ENV_FILE"
-  [[ -x "$VOICE_CONTROL" ]] || die "VoiceDesign control helper missing or not executable: $VOICE_CONTROL"
 
   for expected in "${REQUIRED_ENV_VARS[@]}"; do
     if ! grep -Fqx "$expected" "$ENV_FILE"; then
       die ".env.local is missing required URL: $expected"
     fi
   done
-}
-
-ensure_voice_server() {
-  echo "Ensuring Qwen3 VoiceDesign server is running..."
-  "$VOICE_CONTROL" start
-  "$VOICE_CONTROL" status
 }
 
 check_bridge() {
@@ -66,7 +58,6 @@ start_amica() {
 
 main() {
   require_environment
-  ensure_voice_server
   check_bridge
   echo "Amica env verified: $ENV_FILE"
   echo "Development base URL: http://127.0.0.1:3000"

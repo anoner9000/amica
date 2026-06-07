@@ -52,7 +52,7 @@
   "openrouter_url": "https://openrouter.ai/api/v1",
   "openrouter_model": "openai/gpt-3.5-turbo",
   "tts_muted": "false",
-  "tts_volume": "0.55",
+  "tts_volume": "0.85",
   "tts_backend": "piper",
   "stt_backend": "whisper_browser",
   "vision_backend": "vision_openai",
@@ -113,5 +113,10 @@
   "deiphobe_speech_chat_controls_enabled": "false",
   "deiphobe_speech_auto_render_enabled": "true",
   "deiphobe_speech_auto_play_enabled": "true",
-  "deiphobe_speech_smart_chunks_enabled": "true"
+  "deiphobe_speech_smart_chunks_enabled": "false",
+  "deiphobe_lipsync_gain": "2.5",
+  "deiphobe_lipsync_min_open": "0.03",
+  "deiphobe_lipsync_max_open": "0.85",
+  "deiphobe_lipsync_smoothing": "0.25",
+  "deiphobe_lipsync_silence_threshold": "0.015"
 }

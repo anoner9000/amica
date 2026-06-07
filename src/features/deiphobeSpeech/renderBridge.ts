@@ -10,6 +10,9 @@ export type SpeechRenderResult = {
   error?: string | null;
   audio_url?: string | null;
   render_engine?: string | null;
+  voice_profile?: string | null;
+  render_mode?: "single_file" | "piper" | "smart_chunks" | null;
+  fallback_used?: boolean | null;
 };
 
 export type SpeechRenderCallParams = {
