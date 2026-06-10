@@ -74,4 +74,17 @@ describe("getDeiphobeChatResponseStream", () => {
     expect(new TextDecoder("utf-8").decode(value)).toBe("I didn't catch enough there.\n");
     reader.releaseLock();
   });
+
+  test.each(["", "   ", "[neutral]   "])("does not fetch for blank input: %j", async (input) => {
+    const fetchMock = jest.fn();
+    (globalThis as any).fetch = fetchMock;
+
+    const { getDeiphobeChatResponseStream } = await import("../src/features/chat/deiphobeChat");
+
+    await expect(getDeiphobeChatResponseStream([
+      { role: "system", content: "system" },
+      { role: "user", content: input },
+    ])).rejects.toThrow("Deiphobe backend requires a user message");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

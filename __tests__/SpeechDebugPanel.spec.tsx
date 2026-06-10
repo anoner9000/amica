@@ -329,7 +329,7 @@ describe("Deiphobe speech debug panel", () => {
     });
 
     expect(global.fetch).toHaveBeenCalledWith(
-      "/debug/deiphobe_speech_render",
+      "/api/deiphobeSpeech/debug/deiphobe_speech_render",
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },

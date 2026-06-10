@@ -35,18 +35,18 @@ describe("resolveHostAwareLocalUrl", () => {
 
   afterEach(restoreWindowLocation);
 
-  test("rewrites 127.0.0.1 to LAN hostname when page host is LAN IP", async () => {
+  test("rewrites 127.0.0.1 speech orchestrator URLs to the same-origin proxy when page host is LAN IP", async () => {
     setWindowLocation("192.168.1.81");
     const { resolveHostAwareLocalUrl } = await import("../src/utils/hostAwareUrl");
     const result = resolveHostAwareLocalUrl("http://127.0.0.1:8767/speech/files/test.wav");
-    expect(result).toBe("http://192.168.1.81:8767/speech/files/test.wav");
+    expect(result).toBe("http://192.168.1.81:3000/api/deiphobeSpeech/speech/files/test.wav");
   });
 
-  test("rewrites localhost to LAN hostname when page host is LAN IP", async () => {
+  test("rewrites localhost speech orchestrator URLs to the same-origin proxy when page host is LAN IP", async () => {
     setWindowLocation("192.168.1.81");
     const { resolveHostAwareLocalUrl } = await import("../src/utils/hostAwareUrl");
     const result = resolveHostAwareLocalUrl("http://localhost:8767/speech/files/test.wav");
-    expect(result).toBe("http://192.168.1.81:8767/speech/files/test.wav");
+    expect(result).toBe("http://192.168.1.81:3000/api/deiphobeSpeech/speech/files/test.wav");
   });
 
   test("preserves 127.0.0.1 URL when page host is also localhost", async () => {

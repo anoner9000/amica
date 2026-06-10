@@ -87,4 +87,23 @@ describe("Deiphobe chat display path", () => {
     expect(amicaLife.receiveMessageFromUser).not.toHaveBeenCalled();
     expect(chat.makeAndHandleStream).toHaveBeenCalled();
   });
+
+  test.each(["", "   ", "\n\t"])("ignores blank user turns before chat state or backend: %j", async (message) => {
+    const { Chat } = await import("../src/features/chat/chat");
+    const chat = new Chat() as any;
+
+    chat.interrupt = jest.fn();
+    chat.makeAndHandleStream = jest.fn();
+    chat.setChatLog = jest.fn();
+    chat.setUserMessage = jest.fn();
+    chat.setAssistantMessage = jest.fn();
+    chat.setShownMessage = jest.fn();
+
+    await chat.receiveMessageFromUser(message, false);
+
+    expect(chat.interrupt).not.toHaveBeenCalled();
+    expect(chat.makeAndHandleStream).not.toHaveBeenCalled();
+    expect(chat.setChatLog).not.toHaveBeenCalled();
+    expect(chat.setUserMessage).not.toHaveBeenCalled();
+  });
 });

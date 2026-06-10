@@ -5,7 +5,7 @@ export const DEIPHOBE_SPEECH_ASYNC_ENABLED =
 
 export const DEIPHOBE_SPEECH_ORCHESTRATOR_URL =
   resolveHostAwareLocalUrl(
-    process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_ORCHESTRATOR_URL ?? "http://127.0.0.1:8767",
+    process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_ORCHESTRATOR_URL ?? "/api/deiphobeSpeech",
   );
 
 export type DeiphobeSpeechJobMode = "async_chunks" | "stream" | "auto" | "smart_chunks";

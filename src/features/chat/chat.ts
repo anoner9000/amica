@@ -399,9 +399,10 @@ export class Chat {
 
   // this happens either from text or from voice / whisper completion
   public async receiveMessageFromUser(message: string, amicaLife: boolean) {
-    if (message === null || message === "") {
+    if (message === null || message.trim() === "") {
       return;
     }
+    message = message.trim();
 
     console.time("performance_interrupting");
     console.debug("interrupting...");

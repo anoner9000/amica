@@ -165,4 +165,22 @@ describe("deiphobeChat handler", () => {
     expect(res.body).toBe("Deiphobe. That's me.\n");
     expect(res.body).not.toContain("call me Uther");
   });
+
+  test.each(["", "   ", "[neutral]   "])("rejects blank text without spawning Deiphobe: %j", async (text) => {
+    const apiModule = await import("../src/pages/api/deiphobeChat");
+    const req = {
+      method: "POST",
+      body: {
+        text,
+        messages: [{ role: "user", content: "stale nonblank user message" }],
+      },
+    } as any;
+    const res = createResponse();
+
+    await apiModule.default(req, res as any);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: "Missing text" });
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
 });

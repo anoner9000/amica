@@ -174,15 +174,17 @@ export const ChatLog = ({
   return (
     <>
       <div className="absolute left-12 top-4 z-10">
-        <IconButton
-          iconName="24/ReloadLoop"
-          label={t("Restart")}
-          isProcessing={false}
-          className="bg-slate-600 hover:bg-slate-500 active:bg-slate-500 shadow-xl"
+        <button
+          type="button"
+          aria-label={t("Restart")}
+          className="bg-slate-600 hover:bg-slate-500 active:bg-slate-500 text-white rounded-lg text-sm p-1 text-center inline-flex items-center mr-2 shadow-xl"
           onClick={() => {
             bot.setMessageList([]);
           }}
-        ></IconButton>
+        >
+          <ArrowPathIcon className="h-6 w-6" aria-hidden="true" />
+          <div className="mx-2 font-bold">{t("Restart")}</div>
+        </button>
         <IconButton
           iconName="24/UploadAlt"
           label={t("Load Chat")}

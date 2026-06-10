@@ -199,7 +199,12 @@ export default function MessageInput({
   }, [whisperCppOutput]);
 
   function clickedSendButton() {
-    bot.receiveMessageFromUser(userMessage,false);
+    const message = userMessage.trim();
+    if (!message) {
+      return;
+    }
+
+    bot.receiveMessageFromUser(message,false);
     // only if we are using non-VAD mode should we focus on the input
     if (! vad.listening) {
       if (! hasOnScreenKeyboard()) {
@@ -249,7 +254,7 @@ export default function MessageInput({
                   inputRef.current?.blur();
                 }
 
-                if (userMessage === "") {
+                if (userMessage.trim() === "") {
                   return false;
                 }
 
@@ -268,7 +273,7 @@ export default function MessageInput({
               iconName="24/Send"
               className="ml-2 bg-secondary hover:bg-secondary-hover active:bg-secondary-press disabled:bg-secondary-disabled"
               isProcessing={isChatProcessing || transcriber.isBusy}
-              disabled={isChatProcessing || !userMessage || transcriber.isModelLoading || config("chatbot_backend") === "moshi"}
+              disabled={isChatProcessing || !userMessage.trim() || transcriber.isModelLoading || config("chatbot_backend") === "moshi"}
               onClick={clickedSendButton}
             />
           </div>

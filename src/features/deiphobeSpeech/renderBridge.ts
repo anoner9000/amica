@@ -1,7 +1,7 @@
 import { resolveHostAwareLocalUrl } from "@/utils/hostAwareUrl";
 
 export const SPEECH_RENDER_ENDPOINT = resolveHostAwareLocalUrl(
-  process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_RENDER_BRIDGE_URL ?? "/debug/deiphobe_speech_render",
+  process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_RENDER_BRIDGE_URL ?? "/api/deiphobeSpeech/debug/deiphobe_speech_render",
 );
 
 export type SpeechRenderResult = {

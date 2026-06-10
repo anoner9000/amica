@@ -38,8 +38,9 @@ export default async function handler(
   }
 
   const body = req.body ?? {};
-  const rawText = typeof body.text === "string" ? body.text : "";
-  const text = stripLeadingAmicaExpressionTag(rawText.trim() || getLastUserMessage(body.messages)).trim();
+  const hasText = typeof body.text === "string";
+  const rawText = hasText ? body.text : getLastUserMessage(body.messages);
+  const text = stripLeadingAmicaExpressionTag(rawText).trim();
 
   if (!text.trim()) {
     res.status(400).json({ error: "Missing text" });
