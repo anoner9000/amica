@@ -6,6 +6,7 @@ import { TextInput } from "@/components/textInput";
 import { TextButton } from "@/components/textButton";
 import { config, updateConfig } from "@/utils/config";
 import { SwitchBox } from "@/components/switchBox";
+import { SPEECH_PROVIDER_OPTIONS } from "@/features/deiphobeSpeech/speechProviderOptions";
 
 type PrivateMemoryStatus = {
   privateMode: boolean;
@@ -274,6 +275,8 @@ export function DeiphobeSettingsPage({
   setDeiphobePrivateMemoryRoot,
   deiphobeSpeechAutoplayEnabled,
   setDeiphobeSpeechAutoplayEnabled,
+  deiphobeSpeechProvider,
+  setDeiphobeSpeechProvider,
   setSettingsUpdated,
 }: {
   deiphobeRepoRoot: string;
@@ -294,6 +297,8 @@ export function DeiphobeSettingsPage({
   setDeiphobePrivateMemoryRoot: (value: string) => void;
   deiphobeSpeechAutoplayEnabled: boolean;
   setDeiphobeSpeechAutoplayEnabled: (value: boolean) => void;
+  deiphobeSpeechProvider: string;
+  setDeiphobeSpeechProvider: (value: string) => void;
   setSettingsUpdated: (updated: boolean) => void;
 }) {
   const { t } = useTranslation();
@@ -398,6 +403,23 @@ export function DeiphobeSettingsPage({
                 setSettingsUpdated(true);
               }}
             />
+          </FormRow>
+        </li>
+        <li className="py-4">
+          <FormRow label={t("Speech Provider")}>
+            <select
+              className="mt-2 block w-full rounded-md border-0 py-1.5 pl-3 pr-10 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-indigo-600 sm:text-sm sm:leading-6"
+              value={deiphobeSpeechProvider}
+              onChange={(event: React.ChangeEvent<HTMLSelectElement>) => {
+                setDeiphobeSpeechProvider(event.target.value);
+                updateConfig("deiphobe_speech_provider", event.target.value);
+                setSettingsUpdated(true);
+              }}
+            >
+              {SPEECH_PROVIDER_OPTIONS.map((opt) => (
+                <option key={opt.key} value={opt.key}>{opt.label}</option>
+              ))}
+            </select>
           </FormRow>
         </li>
         <li className="py-4">

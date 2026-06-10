@@ -104,6 +104,7 @@ export const Settings = ({
   const [deiphobePrivateMode, setDeiphobePrivateMode] = useState(config("deiphobe_private_mode"));
   const [deiphobePrivateMemoryRoot, setDeiphobePrivateMemoryRoot] = useState(config("deiphobe_private_memory_root"));
   const [deiphobeSpeechAutoplayEnabled, setDeiphobeSpeechAutoplayEnabled] = useState<boolean>(config("deiphobe_speech_autoplay_enabled") === 'true' ? true : false);
+  const [deiphobeSpeechProvider, setDeiphobeSpeechProvider] = useState(config("deiphobe_speech_provider") || "xtts_stream");
   const [llamaCppUrl, setLlamaCppUrl] = useState(config("llamacpp_url"));
   const [llamaCppStopSequence, setLlamaCppStopSequence] = useState(config("llamacpp_stop_sequence"));
   const [ollamaUrl, setOllamaUrl] = useState(config("ollama_url"));
@@ -511,6 +512,8 @@ export const Settings = ({
         setDeiphobePrivateMemoryRoot={setDeiphobePrivateMemoryRoot}
         deiphobeSpeechAutoplayEnabled={deiphobeSpeechAutoplayEnabled}
         setDeiphobeSpeechAutoplayEnabled={setDeiphobeSpeechAutoplayEnabled}
+        deiphobeSpeechProvider={deiphobeSpeechProvider}
+        setDeiphobeSpeechProvider={setDeiphobeSpeechProvider}
         setSettingsUpdated={setSettingsUpdated}
         />
 
