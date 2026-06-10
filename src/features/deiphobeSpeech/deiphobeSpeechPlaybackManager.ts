@@ -1,7 +1,7 @@
 import { readSpeechPlaybackMuted, readSpeechPlaybackVolume } from "./playbackSettings";
 import type { LipSync } from "@/features/lipSync/lipSync";
 
-export type DeiphobeSpeechPlaybackMode = "smart_chunks" | "single_file" | "piper" | "async_chunks" | "stream";
+export type DeiphobeSpeechPlaybackMode = "smart_chunks" | "single_file" | "chunked_file" | "piper" | "async_chunks" | "stream";
 
 export type DeiphobeSpeechPlaybackMetadata = {
   render_engine?: string | null;

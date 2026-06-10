@@ -14,10 +14,18 @@ export type SpeechRenderResult = {
   audio_url?: string | null;
   render_engine?: string | null;
   voice_profile?: string | null;
-  render_mode?: "single_file" | "piper" | "smart_chunks" | null;
+  render_mode?: "single_file" | "chunked_file" | "piper" | "smart_chunks" | null;
   fallback_used?: boolean | null;
-  timings_ms?: Record<string, number | null>;
+  timings_ms?: Record<string, number | number[] | Array<number | null> | null>;
   adapter_timings_ms?: Record<string, number | null>;
+  chunk_count?: number;
+  chunks?: Array<{
+    index: number;
+    text_sha256: string;
+    text_len: number;
+    preview_start: string;
+    preview_end: string;
+  }>;
   visible_text_sha256?: string;
   spoken_text_sha256?: string;
   render_text_sha256?: string;
@@ -33,6 +41,7 @@ export type SpeechRenderResult = {
     requires_chunking_for_safe_xtts?: boolean;
   };
   audio_governor_warning?: string;
+  audio_governor_action?: string;
 };
 
 export type SpeechRenderCallParams = {

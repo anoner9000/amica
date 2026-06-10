@@ -157,6 +157,34 @@ describe("ChatSpeechRenderButton", () => {
     expect(container.textContent).toContain("play_state: Speaking…");
   });
 
+  test("chunked render shows play control only after final audio_url without autoplay", async () => {
+    mockFetch({
+      rendered: true,
+      status: "rendered_chunked",
+      audio_url: AUDIO_URL,
+      render_engine: "xtts",
+      voice_profile: "deiphobe_xtts_current",
+      render_mode: "chunked_file",
+      chunk_count: 2,
+      chunks: [
+        { index: 0, text_sha256: "a", text_len: 8, preview_start: "Alabama", preview_end: "Alabama" },
+        { index: 1, text_sha256: "b", text_len: 7, preview_start: "Alaska", preview_end: "Alaska" },
+      ],
+      audio_governor_action: "chunked_xtts_render",
+    });
+    renderButton({ voice_posture: "ordinary_chat", autoPlayAfterRender: false });
+
+    await act(async () => {
+      Simulate.click(container.querySelector("button[aria-label='Render speech']")!);
+      await flush();
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(playSpy).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("mode: chunked_file");
+    expect(container.textContent).toContain("▶ Play voice");
+  });
+
   test("auto-play uses the shared playback path after pre-render", async () => {
     mockFetch({
       rendered: true,
