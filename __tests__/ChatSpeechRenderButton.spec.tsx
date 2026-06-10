@@ -117,6 +117,7 @@ describe("ChatSpeechRenderButton", () => {
       render_engine: "piper",
       voice_profile: "deiphobe_voicedesign_v1",
       render_mode: "piper",
+      timings_ms: { total_bridge_ms: 123, engine_render_ms: 100 },
     });
     renderButton({ voice_posture: "memory_recall", autoPlayAfterRender: false });
 

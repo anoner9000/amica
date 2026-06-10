@@ -16,6 +16,8 @@ export type SpeechRenderResult = {
   voice_profile?: string | null;
   render_mode?: "single_file" | "piper" | "smart_chunks" | null;
   fallback_used?: boolean | null;
+  timings_ms?: Record<string, number | null>;
+  adapter_timings_ms?: Record<string, number | null>;
 };
 
 export type SpeechRenderCallParams = {
