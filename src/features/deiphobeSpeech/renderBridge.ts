@@ -1,7 +1,7 @@
 import { resolveHostAwareLocalUrl } from "@/utils/hostAwareUrl";
 
 export const SPEECH_RENDER_ENDPOINT = resolveHostAwareLocalUrl(
-  process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_RENDER_BRIDGE_URL ?? "/api/deiphobeSpeech/debug/deiphobe_speech_render",
+  process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_RENDER_BRIDGE_URL ?? "/api/deiphobeSpeech/debug/deiphobe_speech_render/",
 );
 
 export type SpeechRenderResult = {
@@ -74,5 +74,9 @@ export async function callSpeechRenderBridge(
     throw new Error(text.trim() || `Speech render bridge request failed (${resp.status})`);
   }
 
-  return resp.json() as Promise<SpeechRenderResult>;
+  const data = (await resp.json()) as SpeechRenderResult;
+  return {
+    ...data,
+    audio_url: data.audio_url ? resolveHostAwareLocalUrl(data.audio_url) : data.audio_url,
+  };
 }
