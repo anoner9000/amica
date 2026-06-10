@@ -20,6 +20,27 @@ jest.mock("../src/features/deiphobeSpeech/smartChunkSpeech", () => ({
 jest.mock("../src/features/deiphobeSpeech/deiphobeSpeechPlaybackManager", () => ({
   playDeiphobeSpeechUrls: jest.fn(),
   stopDeiphobeSpeechPlayback: jest.fn(),
+  createDeiphobeSpeechPlaybackQueue: jest.fn(),
+}));
+
+jest.mock("../src/features/deiphobeSpeech/speechJobs", () => ({
+  DEIPHOBE_SPEECH_ASYNC_ENABLED: false,
+  DEIPHOBE_SPEECH_MODE: "async_chunks",
+  DEIPHOBE_SPEECH_ORCHESTRATOR_URL: "http://127.0.0.1:8767",
+  readDeiphobeSpeechMode: jest.fn(() => "async_chunks"),
+  createSpeechJob: jest.fn(),
+  getSpeechJob: jest.fn(),
+  cancelSpeechJob: jest.fn(),
+}));
+
+jest.mock("../src/features/deiphobeSpeech/speechProviderOptions", () => ({
+  SPEECH_PROVIDER_OPTIONS: [
+    { key: "xtts_stream", label: "Live Mode — XTTS Stream", provider: "xtts_stream", speech_mode: "stream", latency_class: "live", supports_streaming: true },
+    { key: "qwen3_voicedesign", label: "Quality Mode — Qwen3 VoiceDesign", provider: "qwen3_voicedesign", speech_mode: "smart_chunks", latency_class: "slow_quality", supports_streaming: false },
+    { key: "piper", label: "Fallback — Piper", provider: "piper", speech_mode: "async_chunks", latency_class: "fallback_fast", supports_streaming: false },
+  ],
+  SPEECH_PROVIDER_DEFAULT: "xtts_stream",
+  findSpeechProviderOption: jest.fn((_key: string | null | undefined) => null),
 }));
 
 jest.mock("file-saver", () => ({ saveAs: jest.fn() }));
@@ -101,6 +122,16 @@ function getPlaybackMock() {
   return require("../src/features/deiphobeSpeech/deiphobeSpeechPlaybackManager") as {
     playDeiphobeSpeechUrls: jest.Mock;
     stopDeiphobeSpeechPlayback: jest.Mock;
+    createDeiphobeSpeechPlaybackQueue: jest.Mock;
+  };
+}
+
+function getSpeechJobsMock() {
+  return require("../src/features/deiphobeSpeech/speechJobs") as {
+    createSpeechJob: jest.Mock;
+    getSpeechJob: jest.Mock;
+    cancelSpeechJob: jest.Mock;
+    readDeiphobeSpeechMode: jest.Mock;
   };
 }
 
@@ -121,6 +152,16 @@ describe("ChatLog — Deiphobe speech playback", () => {
     getSmartMocks().stopSmartChunkPlayback.mockReset();
     getPlaybackMock().playDeiphobeSpeechUrls.mockReset().mockResolvedValue({ outcome: "complete" });
     getPlaybackMock().stopDeiphobeSpeechPlayback.mockReset();
+    getPlaybackMock().createDeiphobeSpeechPlaybackQueue.mockReset().mockReturnValue({
+      enqueueUrls: jest.fn(),
+      close: jest.fn(),
+      fail: jest.fn(),
+      result: Promise.resolve({ outcome: "complete" }),
+    });
+    getSpeechJobsMock().createSpeechJob.mockReset();
+    getSpeechJobsMock().getSpeechJob.mockReset();
+    getSpeechJobsMock().cancelSpeechJob.mockReset().mockResolvedValue({});
+    getSpeechJobsMock().readDeiphobeSpeechMode.mockReset().mockReturnValue("async_chunks");
   });
 
   afterEach(() => {
@@ -350,5 +391,13 @@ describe("ChatLog — Deiphobe speech playback", () => {
     expect(getSmartMocks().callSmartChunkRender).not.toHaveBeenCalled();
     expect(container.textContent).toContain("speech_engine: xtts");
     expect(container.textContent).toContain("speech_mode: single_file");
+  });
+
+  test("async mode off does not call /speech/jobs", async () => {
+    await renderChatLog([
+      { role: "assistant", content: "I held the line.", voice_posture: "ordinary_chat" },
+    ]);
+
+    expect(getSpeechJobsMock().createSpeechJob).not.toHaveBeenCalled();
   });
 });

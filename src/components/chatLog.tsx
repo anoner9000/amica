@@ -17,7 +17,28 @@ import {
   makeUniqueSpeechOutputFilename,
   SPEECH_RENDER_ENDPOINT,
 } from "@/features/deiphobeSpeech/renderBridge";
-import type { DeiphobeSpeechPlaybackMetadata } from "@/features/deiphobeSpeech/deiphobeSpeechPlaybackManager";
+import {
+  createDeiphobeSpeechPlaybackQueue,
+  stopDeiphobeSpeechPlayback,
+  type DeiphobeSpeechPlaybackMetadata,
+} from "@/features/deiphobeSpeech/deiphobeSpeechPlaybackManager";
+import {
+  DEIPHOBE_SPEECH_ASYNC_ENABLED,
+  DEIPHOBE_SPEECH_ORCHESTRATOR_URL,
+  SpeechJobRequestError,
+  cancelSpeechJob,
+  createSpeechJob,
+  getSpeechJob,
+  readDeiphobeSpeechMode,
+  type DeiphobeSpeechJobMode,
+  type SpeechAsyncErrorStage,
+  type SpeechJobState,
+} from "@/features/deiphobeSpeech/speechJobs";
+import {
+  SPEECH_PROVIDER_OPTIONS,
+  findSpeechProviderOption,
+  type SpeechProviderOption,
+} from "@/features/deiphobeSpeech/speechProviderOptions";
 import { ViewerContext } from "@/features/vrmViewer/viewerContext";
 import { resolveAnimationStatePath } from "@/features/vrmViewer/animationState";
 import { loadVRMAnimation } from "@/lib/VRMAnimation/loadVRMAnimation";
@@ -26,6 +47,7 @@ import {
   ArrowPathIcon,
 } from '@heroicons/react/20/solid';
 import { getAssistantChatDisplayName } from "@/utils/chatDisplayName";
+import { resolveHostAwareLocalUrl } from "@/utils/hostAwareUrl";
 import { ChatContext } from "@/features/chat/chatContext";
 import { saveAs } from 'file-saver';
 
@@ -52,6 +74,8 @@ export const ChatLog = ({
     config("deiphobe_speech_auto_play_enabled") === "true";
   const smartChunksEnabled =
     config("deiphobe_speech_smart_chunks_enabled") === "true";
+  const asyncSpeechEnabled = DEIPHOBE_SPEECH_ASYNC_ENABLED;
+  const selectedProvider = findSpeechProviderOption(config("deiphobe_speech_provider"));
 
   // Index of the last assistant message in the list.
   const newestAssistantIdx = messages.reduce<number>(
@@ -188,6 +212,7 @@ export const ChatLog = ({
             // Smart-chunk autoplay: only for the newest assistant message,
             // never for private_memory, never for user messages.
             const autoSmartRender =
+              !asyncSpeechEnabled &&
               autoRenderEnabled &&
               smartChunksEnabled &&
               msg.role === "assistant" &&
@@ -195,11 +220,18 @@ export const ChatLog = ({
               i === newestAssistantIdx;
 
             const autoBridgeRender =
+              !asyncSpeechEnabled &&
               autoRenderEnabled &&
               !smartChunksEnabled &&
               msg.role === "assistant" &&
               msg.voice_posture !== "private_memory" &&
               i === newestAssistantIdx;
+
+            const autoAsyncRender =
+              asyncSpeechEnabled &&
+              msg.role === "assistant" &&
+              msg.voice_posture !== "private_memory" &&
+              i === messages.length - 1;
 
             return (
               <div key={i} ref={messages.length - 1 === i ? chatScrollRef : null}>
@@ -216,7 +248,9 @@ export const ChatLog = ({
                   speechControlsEnabled={speechChatControlsEnabled}
                   autoSmartRender={autoSmartRender}
                   autoBridgeRender={autoBridgeRender}
+                  autoAsyncRender={autoAsyncRender}
                   autoSmartPlay={autoPlayEnabled}
+                  selectedProvider={selectedProvider}
                   lipSync={viewer?.model?._lipSync}
                 />
 
@@ -249,7 +283,9 @@ function Chat({
   speechControlsEnabled = false,
   autoSmartRender = false,
   autoBridgeRender = false,
+  autoAsyncRender = false,
   autoSmartPlay = false,
+  selectedProvider = null,
   lipSync,
 }: {
   role: string;
@@ -264,7 +300,9 @@ function Chat({
   speechControlsEnabled?: boolean;
   autoSmartRender?: boolean;
   autoBridgeRender?: boolean;
+  autoAsyncRender?: boolean;
   autoSmartPlay?: boolean;
+  selectedProvider?: SpeechProviderOption | null;
   lipSync?: import("@/features/lipSync/lipSync").LipSync;
 }) {
   const { t } = useTranslation();
@@ -272,24 +310,105 @@ function Chat({
   // ── smart-chunk render/play state ─────────────────────────────────────────
   const [smartStatus, setSmartStatus] = useState<SmartChunkStatus>("idle");
   const [speechMetadata, setSpeechMetadata] = useState<DeiphobeSpeechPlaybackMetadata | null>(null);
+  const [activeSpeechJobId, setActiveSpeechJobId] = useState<string | null>(null);
   const speechOwnerId = `deiphobe-message-${num}`;
+
+  function setAsyncSpeechError(
+    stage: SpeechAsyncErrorStage,
+    options: {
+      detail?: string | null;
+      status?: number | null;
+      renderEngine?: string | null;
+      chunkCount?: number | null;
+      chunkStatus?: string | null;
+      firstAudioLatencyMs?: number | null;
+      totalRenderMs?: number | null;
+      speechMode?: "async_chunks" | "stream" | "auto" | null;
+      streamEndpoint?: string | null;
+      firstAudioChunkLatencyMs?: number | null;
+      serverTimeToFirstAudioChunkMs?: number | null;
+      totalStreamDurationMs?: number | null;
+      streamChunkCount?: number | null;
+      totalPcmBytes?: number | null;
+      fallbackUsed?: boolean | null;
+      fallbackReason?: string | null;
+    } = {},
+  ) {
+    console.warn("[Deiphobe async speech]", {
+      stage,
+      endpoint: DEIPHOBE_SPEECH_ORCHESTRATOR_URL,
+      status: options.status ?? null,
+      detail: options.detail ?? null,
+      ownerId: speechOwnerId,
+    });
+    const prov = selectedProviderRef.current;
+    setSpeechMetadata((prev) => ({
+      render_engine: options.renderEngine ?? prev?.render_engine ?? null,
+      profile: prev?.profile ?? null,
+      endpoint: DEIPHOBE_SPEECH_ORCHESTRATOR_URL,
+      mode: options.speechMode === "stream" ? "stream" : options.speechMode === "smart_chunks" ? "smart_chunks" : "async_chunks",
+      error_stage: stage,
+      error_status: options.status ?? null,
+      error_detail: options.detail ?? null,
+      chunk_count: options.chunkCount ?? prev?.chunk_count ?? null,
+      chunk_status: options.chunkStatus ?? prev?.chunk_status ?? null,
+      first_audio_latency_ms: options.firstAudioLatencyMs ?? prev?.first_audio_latency_ms ?? null,
+      first_audio_chunk_latency_ms: options.firstAudioChunkLatencyMs ?? prev?.first_audio_chunk_latency_ms ?? null,
+      server_time_to_first_audio_chunk_ms: options.serverTimeToFirstAudioChunkMs ?? prev?.server_time_to_first_audio_chunk_ms ?? null,
+      total_render_ms: options.totalRenderMs ?? prev?.total_render_ms ?? null,
+      total_stream_duration_ms: options.totalStreamDurationMs ?? prev?.total_stream_duration_ms ?? null,
+      stream_endpoint: options.streamEndpoint ?? prev?.stream_endpoint ?? null,
+      stream_chunk_count: options.streamChunkCount ?? prev?.stream_chunk_count ?? null,
+      total_pcm_bytes: options.totalPcmBytes ?? prev?.total_pcm_bytes ?? null,
+      render_mode: prev?.render_mode ?? null,
+      fallback_used: options.fallbackUsed ?? prev?.fallback_used ?? false,
+      fallback_reason: options.fallbackReason ?? prev?.fallback_reason ?? null,
+      selected_provider: prov?.key ?? prev?.selected_provider ?? null,
+      provider_latency_class: prov?.latency_class ?? prev?.provider_latency_class ?? null,
+      provider_supports_streaming: prov?.supports_streaming ?? prev?.provider_supports_streaming ?? null,
+    }));
+  }
+
+  function asyncErrorOptionsFromState(state: SpeechJobState) {
+    return {
+      renderEngine: state.render_engine,
+      chunkCount: state.chunks.length,
+      chunkStatus: state.status,
+      firstAudioLatencyMs: state.timing.first_audio_latency_ms,
+      totalRenderMs: state.timing.total_render_ms,
+      speechMode: state.speech_mode,
+      streamEndpoint: state.stream_endpoint ?? null,
+      firstAudioChunkLatencyMs: state.first_audio_chunk_latency_ms ?? null,
+      serverTimeToFirstAudioChunkMs: state.server_time_to_first_audio_chunk_ms ?? null,
+      totalStreamDurationMs: state.total_stream_duration_ms ?? null,
+      streamChunkCount: state.stream_chunk_count ?? null,
+      totalPcmBytes: state.total_pcm_bytes ?? null,
+      fallbackUsed: Boolean(state.fallback_used),
+      fallbackReason: state.fallback_reason ?? null,
+    };
+  }
 
   // Refs so async handlers can read the latest prop values without going stale.
   const autoSmartRenderRef = useRef(autoSmartRender);
   const autoBridgeRenderRef = useRef(autoBridgeRender);
   const autoSmartPlayRef = useRef(autoSmartPlay);
+  const autoAsyncRenderRef = useRef(autoAsyncRender);
   const messageRef = useRef(message);
+  const selectedProviderRef = useRef(selectedProvider ?? null);
   useEffect(() => { autoSmartRenderRef.current = autoSmartRender; }, [autoSmartRender]);
   useEffect(() => { autoBridgeRenderRef.current = autoBridgeRender; }, [autoBridgeRender]);
   useEffect(() => { autoSmartPlayRef.current = autoSmartPlay; }, [autoSmartPlay]);
+  useEffect(() => { autoAsyncRenderRef.current = autoAsyncRender; }, [autoAsyncRender]);
   useEffect(() => { messageRef.current = message; }, [message]);
+  useEffect(() => { selectedProviderRef.current = selectedProvider ?? null; }, [selectedProvider]);
 
   // Track whether any auto-render is active to detect true→false transitions.
-  const autoRenderActive = autoSmartRender || autoBridgeRender;
+  const autoRenderActive = autoSmartRender || autoBridgeRender || autoAsyncRender;
   const prevAutoRenderActiveRef = useRef(false);
   // Guards: fire each render path at most once per "newest message" period.
   const smartRenderFiredRef = useRef(false);
   const bridgeRenderFiredRef = useRef(false);
+  const asyncRenderFiredRef = useRef(false);
 
   // Cancel playback when this message is no longer the newest.
   useEffect(() => {
@@ -298,12 +417,17 @@ function Chat({
 
     if (wasActive && !autoRenderActive) {
       stopSmartChunkPlayback();
+      if (activeSpeechJobId) {
+        void cancelSpeechJob(activeSpeechJobId).catch(() => undefined);
+        setActiveSpeechJobId(null);
+      }
       setSmartStatus("idle");
       setSpeechMetadata(null);
       smartRenderFiredRef.current = false;
       bridgeRenderFiredRef.current = false;
+      asyncRenderFiredRef.current = false;
     }
-  }, [autoRenderActive]);
+  }, [activeSpeechJobId, autoRenderActive]);
 
   // Auto-render + optional auto-play for the newest assistant message.
   useEffect(() => {
@@ -395,6 +519,214 @@ function Chat({
     })();
   }, [autoBridgeRender, role]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!autoAsyncRender || role !== "assistant") return;
+    if (asyncRenderFiredRef.current) return;
+    asyncRenderFiredRef.current = true;
+
+    let disposed = false;
+
+    void (async () => {
+      setSmartStatus("rendering");
+      let asyncStage: SpeechAsyncErrorStage = "create_job";
+      try {
+        console.debug("[Deiphobe async speech] create_job", {
+          endpoint: DEIPHOBE_SPEECH_ORCHESTRATOR_URL,
+          ownerId: speechOwnerId,
+        });
+        const prov = selectedProviderRef.current;
+        const speechMode: DeiphobeSpeechJobMode = prov
+          ? (prov.speech_mode as DeiphobeSpeechJobMode)
+          : readDeiphobeSpeechMode();
+        const created = await createSpeechJob({
+          text: messageRef.current,
+          posture: voice_posture ?? animation_state ?? "ordinary_chat",
+          operator_name: undefined,
+          private_mode: false,
+          engine: "auto",
+          chunking: true,
+          speech_mode: speechMode,
+          ...(prov ? { provider: prov.provider } : {}),
+        });
+        if (disposed || !autoAsyncRenderRef.current) {
+          setAsyncSpeechError("cancelled", { detail: "async speech job was superseded before playback" });
+          void cancelSpeechJob(created.job_id).catch(() => undefined);
+          return;
+        }
+
+        setActiveSpeechJobId(created.job_id);
+        let nextChunkIndex = 0;
+        let playbackQueue: ReturnType<typeof createDeiphobeSpeechPlaybackQueue> | null = null;
+
+        for (;;) {
+          asyncStage = "poll_job";
+          console.debug("[Deiphobe async speech] poll_job", {
+            endpoint: DEIPHOBE_SPEECH_ORCHESTRATOR_URL,
+            jobId: created.job_id,
+          });
+          const state: SpeechJobState = await getSpeechJob(created.job_id);
+          if (disposed || !autoAsyncRenderRef.current) {
+            setAsyncSpeechError("cancelled", {
+              detail: "async speech job cancelled during polling",
+              ...asyncErrorOptionsFromState(state),
+            });
+            void cancelSpeechJob(created.job_id).catch(() => undefined);
+            playbackQueue?.fail("cancelled");
+            return;
+          }
+
+          const readyChunks = state.chunks
+            .filter((chunk) => chunk.audio_url && (chunk.status === "ready" || chunk.status === "cache_hit"))
+            .sort((a, b) => a.index - b.index);
+          const readyByIndex = new Map(readyChunks.map((chunk) => [chunk.index, chunk]));
+
+          const pollProv = selectedProviderRef.current;
+          setSpeechMetadata({
+            render_engine: state.render_engine,
+            profile: readyChunks.find((chunk) => Boolean(chunk.voice_profile))?.voice_profile ?? undefined,
+            endpoint: DEIPHOBE_SPEECH_ORCHESTRATOR_URL,
+            mode: state.speech_mode === "stream" ? "stream" : state.speech_mode === "smart_chunks" ? "smart_chunks" : "async_chunks",
+            error_stage: null,
+            error_status: null,
+            error_detail: null,
+            chunk_count: state.chunks.length,
+            chunk_status: state.status,
+            first_audio_latency_ms: state.timing.first_audio_latency_ms,
+            first_audio_chunk_latency_ms: state.first_audio_chunk_latency_ms ?? null,
+            server_time_to_first_audio_chunk_ms: state.server_time_to_first_audio_chunk_ms ?? null,
+            total_render_ms: state.timing.total_render_ms,
+            total_stream_duration_ms: state.total_stream_duration_ms ?? null,
+            stream_endpoint: state.stream_endpoint ?? null,
+            stream_chunk_count: state.stream_chunk_count ?? null,
+            total_pcm_bytes: state.total_pcm_bytes ?? null,
+            fallback_used: Boolean(state.fallback_used),
+            fallback_reason: state.fallback_reason ?? null,
+            selected_provider: pollProv?.key ?? null,
+            provider_latency_class: pollProv?.latency_class ?? null,
+            provider_supports_streaming: pollProv?.supports_streaming ?? null,
+          });
+
+          while (readyByIndex.has(nextChunkIndex)) {
+            const chunk = readyByIndex.get(nextChunkIndex)!;
+            if (playbackQueue === null && autoSmartPlayRef.current) {
+              playbackQueue = createDeiphobeSpeechPlaybackQueue({
+                ownerId: speechOwnerId,
+                lipSync,
+                metadata: {
+                  render_engine: state.render_engine,
+                  endpoint: DEIPHOBE_SPEECH_ORCHESTRATOR_URL,
+                  mode: state.speech_mode === "stream" ? "stream" : state.speech_mode === "smart_chunks" ? "smart_chunks" : "async_chunks",
+                  chunk_count: state.chunks.length,
+                  chunk_status: state.status,
+                  first_audio_latency_ms: state.timing.first_audio_latency_ms,
+                  first_audio_chunk_latency_ms: state.first_audio_chunk_latency_ms ?? null,
+                  server_time_to_first_audio_chunk_ms: state.server_time_to_first_audio_chunk_ms ?? null,
+                  total_render_ms: state.timing.total_render_ms,
+                  total_stream_duration_ms: state.total_stream_duration_ms ?? null,
+                  stream_endpoint: state.stream_endpoint ?? null,
+                  stream_chunk_count: state.stream_chunk_count ?? null,
+                  total_pcm_bytes: state.total_pcm_bytes ?? null,
+                  fallback_used: Boolean(state.fallback_used),
+                  fallback_reason: state.fallback_reason ?? null,
+                  selected_provider: pollProv?.key ?? null,
+                  provider_latency_class: pollProv?.latency_class ?? null,
+                  provider_supports_streaming: pollProv?.supports_streaming ?? null,
+                },
+                onStatus: (status) => {
+                  if (status === "playing") setSmartStatus("playing");
+                  if (status === "complete") setSmartStatus("complete");
+                  if (status === "error") {
+                    setSmartStatus("error");
+                    setAsyncSpeechError("playback", {
+                      detail: "audio playback failed",
+                      ...asyncErrorOptionsFromState(state),
+                    });
+                  }
+                },
+              });
+              void playbackQueue.result.then((result) => {
+                if (result.outcome === "error") {
+                  const detail = result.error ?? "audio playback failed";
+                  const stage: SpeechAsyncErrorStage = detail.includes("audio fetch failed")
+                    ? "chunk_audio"
+                    : "playback";
+                  setAsyncSpeechError(stage, {
+                    detail,
+                    ...asyncErrorOptionsFromState(state),
+                  });
+                } else if (result.outcome === "cancelled") {
+                  setAsyncSpeechError("cancelled", {
+                    detail: "audio playback cancelled",
+                    ...asyncErrorOptionsFromState(state),
+                  });
+                }
+              });
+            }
+            if (playbackQueue && chunk.audio_url) {
+              asyncStage = "chunk_audio";
+              playbackQueue.enqueueUrls([resolveHostAwareLocalUrl(chunk.audio_url)]);
+              setSmartStatus("ready");
+            } else if (!autoSmartPlayRef.current) {
+              setSmartStatus("ready");
+            }
+            nextChunkIndex += 1;
+          }
+
+          if (state.status === "failed") {
+            playbackQueue?.fail(state.error ?? "render failed");
+            setAsyncSpeechError("poll_job", {
+              detail: state.error ?? "render failed",
+              ...asyncErrorOptionsFromState(state),
+            });
+            setSmartStatus("error");
+            return;
+          }
+          if (state.status === "cancelled") {
+            playbackQueue?.fail("cancelled");
+            setAsyncSpeechError("cancelled", {
+              detail: "async speech job cancelled",
+              ...asyncErrorOptionsFromState(state),
+            });
+            setSmartStatus("idle");
+            return;
+          }
+          if (state.status === "complete") {
+            playbackQueue?.close();
+            if (!playbackQueue) {
+              setSmartStatus("ready");
+            }
+            return;
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      } catch (error) {
+        if (error instanceof SpeechJobRequestError) {
+          setAsyncSpeechError(error.stage, {
+            detail: error.responseText ?? error.message,
+            status: error.status ?? null,
+          });
+          console.debug("[Deiphobe async speech] request failed", {
+            stage: error.stage,
+            endpoint: error.endpoint,
+            status: error.status ?? null,
+          });
+        } else {
+          setAsyncSpeechError(asyncStage, {
+            detail: error instanceof Error ? error.message : String(error),
+          });
+        }
+        if (!disposed && autoAsyncRenderRef.current) {
+          setSmartStatus("error");
+        }
+      }
+    })();
+
+    return () => {
+      disposed = true;
+    };
+  }, [animation_state, autoAsyncRender, lipSync, role, speechOwnerId, voice_posture]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── render ────────────────────────────────────────────────────────────────
 
   const onClickButton = () => {
@@ -453,8 +785,59 @@ function Chat({
                   <div>speech_profile: {speechMetadata.profile ?? "n/a"}</div>
                   <div>speech_endpoint: {speechMetadata.endpoint ?? "n/a"}</div>
                   <div>speech_mode: {speechMetadata.mode}</div>
+                  {speechMetadata.selected_provider != null && (
+                    <div>selected_provider: {speechMetadata.selected_provider}</div>
+                  )}
+                  {speechMetadata.provider_latency_class != null && (
+                    <div>provider_latency_class: {speechMetadata.provider_latency_class}</div>
+                  )}
+                  {speechMetadata.provider_supports_streaming != null && (
+                    <div>provider_supports_streaming: {String(speechMetadata.provider_supports_streaming)}</div>
+                  )}
+                  {speechMetadata.error_stage != null && (
+                    <div>speech_error_stage: {speechMetadata.error_stage}</div>
+                  )}
+                  {speechMetadata.error_status != null && (
+                    <div>speech_error_status: {speechMetadata.error_status}</div>
+                  )}
+                  {speechMetadata.error_detail != null && (
+                    <div>speech_error_detail: {speechMetadata.error_detail}</div>
+                  )}
                   {speechMetadata.chunk_count != null && (
                     <div>chunk_count: {speechMetadata.chunk_count}</div>
+                  )}
+                  {speechMetadata.chunk_status != null && (
+                    <div>chunk_status: {speechMetadata.chunk_status}</div>
+                  )}
+                  {speechMetadata.first_audio_latency_ms != null && (
+                    <div>first_audio_latency_ms: {speechMetadata.first_audio_latency_ms}</div>
+                  )}
+                  {speechMetadata.first_audio_chunk_latency_ms != null && (
+                    <div>first_audio_chunk_latency_ms: {speechMetadata.first_audio_chunk_latency_ms}</div>
+                  )}
+                  {speechMetadata.server_time_to_first_audio_chunk_ms != null && (
+                    <div>server_time_to_first_audio_chunk_ms: {speechMetadata.server_time_to_first_audio_chunk_ms}</div>
+                  )}
+                  {speechMetadata.total_render_ms != null && (
+                    <div>total_render_ms: {speechMetadata.total_render_ms}</div>
+                  )}
+                  {speechMetadata.total_stream_duration_ms != null && (
+                    <div>total_stream_duration_ms: {speechMetadata.total_stream_duration_ms}</div>
+                  )}
+                  {speechMetadata.stream_endpoint != null && (
+                    <div>stream_endpoint: {speechMetadata.stream_endpoint}</div>
+                  )}
+                  {speechMetadata.stream_chunk_count != null && (
+                    <div>stream_chunk_count: {speechMetadata.stream_chunk_count}</div>
+                  )}
+                  {speechMetadata.total_pcm_bytes != null && (
+                    <div>total_pcm_bytes: {speechMetadata.total_pcm_bytes}</div>
+                  )}
+                  {speechMetadata.fallback_used != null && (
+                    <div>fallback_used: {String(speechMetadata.fallback_used)}</div>
+                  )}
+                  {speechMetadata.fallback_reason != null && (
+                    <div>fallback_reason: {speechMetadata.fallback_reason}</div>
                   )}
                   {speechMetadata.render_mode != null && (
                     <div>render_mode: {speechMetadata.render_mode}</div>
@@ -472,6 +855,10 @@ function Chat({
                   status={smartStatus}
                   onStop={() => {
                     stopSmartChunkPlayback();
+                    if (activeSpeechJobId) {
+                      void cancelSpeechJob(activeSpeechJobId).catch(() => undefined);
+                      setActiveSpeechJobId(null);
+                    }
                     setSmartStatus("ready");
                   }}
                 />
