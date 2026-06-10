@@ -465,7 +465,7 @@ function Chat({
 
       if (autoSmartPlayRef.current && result.audioUrls.length > 0) {
         await playSmartChunks(
-          result.audioUrls,
+          result.audioUrls.map(resolveHostAwareLocalUrl),
           setSmartStatus,
           lipSync,
           playbackMeta,
@@ -511,7 +511,7 @@ function Chat({
         setSmartStatus("ready");
 
         if (autoSmartPlayRef.current) {
-          await playSmartChunks([result.audio_url], setSmartStatus, lipSync, playbackMeta);
+          await playSmartChunks([resolveHostAwareLocalUrl(result.audio_url)], setSmartStatus, lipSync, playbackMeta);
         }
       } catch {
         if (autoBridgeRenderRef.current) setSmartStatus("error");

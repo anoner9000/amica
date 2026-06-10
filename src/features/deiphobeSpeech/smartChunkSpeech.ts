@@ -9,6 +9,7 @@ import {
   stopDeiphobeSpeechPlayback,
   type DeiphobeSpeechPlaybackMetadata,
 } from "./deiphobeSpeechPlaybackManager";
+import { resolveHostAwareLocalUrl } from "@/utils/hostAwareUrl";
 
 export type SmartChunkStatus =
   | "idle"
@@ -44,9 +45,10 @@ export type SmartChunkRenderResult = {
   error?: string;
 };
 
-const SMART_CHUNKS_ENDPOINT =
+const SMART_CHUNKS_ENDPOINT = resolveHostAwareLocalUrl(
   process.env.NEXT_PUBLIC_DEIPHOBE_SMART_CHUNKS_URL ??
-  "http://127.0.0.1:8771/debug/render_smart_chunks";
+  "http://127.0.0.1:8771/debug/render_smart_chunks",
+);
 
 export async function callSmartChunkRender(
   text: string,

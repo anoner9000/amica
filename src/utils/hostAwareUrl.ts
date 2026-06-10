@@ -7,6 +7,11 @@ export function resolveHostAwareLocalUrl(url: string): string {
     return url;
   }
 
+  // Relative URLs are already same-origin — no host substitution needed.
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    return url;
+  }
+
   try {
     const parsed = new URL(url, window.location.origin);
 

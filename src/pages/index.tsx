@@ -392,7 +392,7 @@ export default function Home() {
       
       <MessageInputContainer isChatProcessing={chatProcessing} />
 
-      <BackendStatusLine />
+      {/* BackendStatusLine is shown in the debug pane; not shown in the main UI */}
 
       {/* main menu */}
       <div className="absolute z-10 m-2">
