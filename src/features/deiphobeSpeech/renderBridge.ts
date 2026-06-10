@@ -18,6 +18,21 @@ export type SpeechRenderResult = {
   fallback_used?: boolean | null;
   timings_ms?: Record<string, number | null>;
   adapter_timings_ms?: Record<string, number | null>;
+  visible_text_sha256?: string;
+  spoken_text_sha256?: string;
+  render_text_sha256?: string;
+  render_text_len?: number;
+  render_text_preview_start?: string;
+  render_text_preview_end?: string;
+  fidelity_risk?: string[];
+  audio_governor_policy?: {
+    version?: number;
+    lane?: string;
+    tts_trusted?: boolean;
+    action?: string;
+    requires_chunking_for_safe_xtts?: boolean;
+  };
+  audio_governor_warning?: string;
 };
 
 export type SpeechRenderCallParams = {

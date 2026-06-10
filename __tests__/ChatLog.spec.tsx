@@ -393,6 +393,26 @@ describe("ChatLog — Deiphobe speech playback", () => {
     expect(container.textContent).toContain("speech_mode: single_file");
   });
 
+  test("private_memory messages are excluded from background pre-render", async () => {
+    getConfigMock().mockImplementation((key: string) => {
+      if (key === "deiphobe_speech_chat_controls_enabled") return "true";
+      if (key === "deiphobe_speech_prerender_enabled") return "true";
+      if (key === "deiphobe_speech_auto_render_enabled") return "true";
+      if (key === "deiphobe_speech_auto_play_enabled") return "true";
+      if (key === "deiphobe_speech_smart_chunks_enabled") return "false";
+      return "false";
+    });
+
+    await renderChatLog([
+      { role: "assistant", content: "This is private.", voice_posture: "private_memory" },
+    ]);
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(getSmartMocks().callSmartChunkRender).not.toHaveBeenCalled();
+    expect(getSpeechJobsMock().createSpeechJob).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("This is private.");
+  });
+
   test("async mode off does not call /speech/jobs", async () => {
     await renderChatLog([
       { role: "assistant", content: "I held the line.", voice_posture: "ordinary_chat" },
