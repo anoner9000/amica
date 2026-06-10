@@ -76,6 +76,7 @@ export default async function handler(
     DEIPHOBE_CHAT_SESSION_ID: sessionId,
     DEIPHOBE_CHAT_NAMESPACE: namespace,
     DEIPHOBE_PRIVATE_MODE: isTruthy(privateMode) ? "1" : "0",
+    CLOCKD_SESSION_OVERRIDE_JSON: process.env.CLOCKD_SESSION_OVERRIDE_JSON || '{"active": true}',
   };
   if (privateMemoryRoot) {
     env.DEIPHOBE_PRIVATE_MEMORY_ROOT = privateMemoryRoot;
