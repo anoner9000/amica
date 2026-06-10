@@ -19,6 +19,10 @@ export function resolveHostAwareLocalUrl(url: string): string {
       return parsed.toString();
     }
 
+    if (parsed.port === "8767" && !isLocalHostname(window.location.hostname)) {
+      return `${window.location.origin}/api/deiphobeSpeech${parsed.pathname}${parsed.search}`;
+    }
+
     if (
       window.location.protocol === "https:" &&
       parsed.hostname === "127.0.0.1" &&
