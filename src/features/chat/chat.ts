@@ -716,7 +716,7 @@ export class Chat {
       const reply = receivedMessage.trim();
       if (reply && this.currentStreamIdx === streamIdx) {
         this.bubbleMessage("assistant", reply);
-        localChatLatency.recordCommitted();
+        localChatLatency.recordCommitted(reply.length);
         if (!isDeiphobeSpeechRenderBridgeConfigured()) {
           const screenplay = textsToScreenplay([`[neutral] ${reply}`])[0];
           this.ttsJobs.enqueue({

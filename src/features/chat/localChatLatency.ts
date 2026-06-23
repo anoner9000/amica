@@ -1,5 +1,5 @@
 // Developer-only local chat latency tracker for the Deiphobe text-submit path.
-// All output goes to console.debug — no UI changes, no audio side effects.
+// Output goes to console.info — visible at the default Chrome console log level.
 // Inspect mid-session: window.__amicaLocalChatLatency
 
 interface LocalChatLatencyMarks {
@@ -8,6 +8,7 @@ interface LocalChatLatencyMarks {
   t_fetch_done?: number;
   t_first_chunk?: number;
   t_committed?: number;
+  reply_chars?: number;
 }
 
 function _now(): number {
@@ -42,8 +43,9 @@ class LocalChatLatencyTracker {
     }
   }
 
-  recordCommitted(): void {
+  recordCommitted(replyLength: number): void {
     this.marks.t_committed = _now();
+    this.marks.reply_chars = replyLength;
     this._log();
   }
 
@@ -54,13 +56,14 @@ class LocalChatLatencyTracker {
   private _log(): void {
     const m = this.marks;
     if (m.t_submit === undefined) return;
-    console.debug(
+    console.info(
       "[amica-latency]",
       `submit→fetch: ${_fmt(m.t_submit, m.t_fetch_start)}`,
       `| fetch→response: ${_fmt(m.t_fetch_start, m.t_fetch_done)}`,
       `| response→first_chunk: ${_fmt(m.t_fetch_done, m.t_first_chunk)}`,
       `| first_chunk→committed: ${_fmt(m.t_first_chunk, m.t_committed)}`,
       `| total: ${_fmt(m.t_submit, m.t_committed)}`,
+      `| reply: ${m.reply_chars ?? "n/a"} chars`,
     );
   }
 }
