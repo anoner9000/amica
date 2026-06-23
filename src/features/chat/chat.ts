@@ -23,6 +23,7 @@ import {
 import { getKoboldAiChatResponseStream } from "./koboldAiChat";
 import { getReasoingEngineChatResponseStream } from "./reasoiningEngineChat";
 import { getDeiphobeChatResponseStream } from "./deiphobeChat";
+import { localChatLatency } from "./localChatLatency";
 import { shouldUseReasoningEngine } from "./chatBackendRouting";
 
 import { rvc } from "@/features/rvc/rvc";
@@ -708,12 +709,14 @@ export class Chat {
           break;
         }
         receivedMessage += decoder.decode(value, { stream: true });
+        localChatLatency.recordFirstChunk();
       }
       receivedMessage += decoder.decode();
 
       const reply = receivedMessage.trim();
       if (reply && this.currentStreamIdx === streamIdx) {
         this.bubbleMessage("assistant", reply);
+        localChatLatency.recordCommitted();
         if (!isDeiphobeSpeechRenderBridgeConfigured()) {
           const screenplay = textsToScreenplay([`[neutral] ${reply}`])[0];
           this.ttsJobs.enqueue({

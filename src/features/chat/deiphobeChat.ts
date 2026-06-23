@@ -1,5 +1,6 @@
 import { Message } from "./messages";
 import { stripLeadingAmicaExpressionTag } from "./deiphobePrompt";
+import { localChatLatency } from "./localChatLatency";
 
 function getLastUserMessage(messages: Message[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -38,6 +39,7 @@ export async function getDeiphobeChatResponseStream(
     text,
   });
 
+  localChatLatency.recordFetchStart();
   const response = await fetch("/api/deiphobeChat", {
     method: "POST",
     headers: {
@@ -52,5 +54,6 @@ export async function getDeiphobeChatResponseStream(
   if (!response.ok || !response.body) {
     throw new Error(`Deiphobe chat error (${response.status})`);
   }
+  localChatLatency.recordFetchDone();
   return response.body;
 }

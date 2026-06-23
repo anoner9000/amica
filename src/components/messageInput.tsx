@@ -12,6 +12,7 @@ import { ChatContext } from "@/features/chat/chatContext";
 import { openaiWhisper  } from "@/features/openaiWhisper/openaiWhisper";
 import { whispercpp  } from "@/features/whispercpp/whispercpp";
 import { config } from "@/utils/config";
+import { localChatLatency } from "@/features/chat/localChatLatency";
 import { WaveFile } from "wavefile";
 import { AmicaLifeContext } from "@/features/amicaLife/amicaLifeContext";
 import { AudioControlsContext } from "@/features/moshi/components/audioControlsContext";
@@ -204,6 +205,7 @@ export default function MessageInput({
       return;
     }
 
+    localChatLatency.recordSubmit();
     bot.receiveMessageFromUser(message,false);
     // only if we are using non-VAD mode should we focus on the input
     if (! vad.listening) {
