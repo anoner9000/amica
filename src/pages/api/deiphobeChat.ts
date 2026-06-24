@@ -41,6 +41,12 @@ export default async function handler(
   const hasText = typeof body.text === "string";
   const rawText = hasText ? body.text : getLastUserMessage(body.messages);
   const text = stripLeadingAmicaExpressionTag(rawText).trim();
+  const rawMessages: Message[] = Array.isArray(body.messages) ? (body.messages as Message[]) : [];
+  const amicaMessageCount = rawMessages.length;
+  const amicaIncomingChars = rawMessages.reduce(
+    (sum: number, m: Message) => sum + (typeof m.content === "string" ? m.content.length : 0),
+    0,
+  );
 
   if (!text.trim()) {
     res.status(400).json({ error: "Missing text" });
@@ -78,6 +84,8 @@ export default async function handler(
     DEIPHOBE_CHAT_NAMESPACE: namespace,
     DEIPHOBE_PRIVATE_MODE: isTruthy(privateMode) ? "1" : "0",
     CLOCKD_SESSION_OVERRIDE_JSON: process.env.CLOCKD_SESSION_OVERRIDE_JSON || '{"active": true}',
+    DEIPHOBE_AMICA_MESSAGE_COUNT: String(amicaMessageCount),
+    DEIPHOBE_AMICA_INCOMING_CHARS: String(amicaIncomingChars),
   };
   if (privateMemoryRoot) {
     env.DEIPHOBE_PRIVATE_MEMORY_ROOT = privateMemoryRoot;
