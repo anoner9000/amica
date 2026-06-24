@@ -65,6 +65,20 @@ export default async function handler(
     10,
   );
 
+  // Optional token budget for the Deiphobe chat subprocess.
+  // Precedence: process.env.LLM_NUM_PREDICT (explicit server env) > deiphobe_chat_num_predict config > unset.
+  // Empty string or absent config = no cap (current behavior).
+  const chatNumPredictRaw = config("deiphobe_chat_num_predict").trim();
+  let chatNumPredict: string | null = null;
+  if (chatNumPredictRaw !== "") {
+    const parsed = Number.parseInt(chatNumPredictRaw, 10);
+    if (Number.isFinite(parsed) && parsed > 0 && String(parsed) === chatNumPredictRaw) {
+      chatNumPredict = chatNumPredictRaw;
+    } else {
+      console.warn("[Amica Deiphobe] deiphobe_chat_num_predict ignored: expected a positive integer");
+    }
+  }
+
   console.debug("[Amica Deiphobe] starting", {
     repoRoot,
     command,
@@ -73,6 +87,7 @@ export default async function handler(
     namespace,
     privateMode: isTruthy(privateMode),
     privateMemoryRoot: privateMemoryRoot ? "[configured]" : "[not configured]",
+    chatNumPredict: chatNumPredict ?? "[unset]",
     timeoutSeconds,
     text,
   });
@@ -89,6 +104,10 @@ export default async function handler(
   };
   if (privateMemoryRoot) {
     env.DEIPHOBE_PRIVATE_MEMORY_ROOT = privateMemoryRoot;
+  }
+  // Apply config token budget only when the server env does not already set it.
+  if (!process.env.LLM_NUM_PREDICT && chatNumPredict !== null) {
+    env.LLM_NUM_PREDICT = chatNumPredict;
   }
 
   const child = spawn(command, ["chat", "--text", text], {

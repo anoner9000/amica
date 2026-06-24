@@ -44,6 +44,7 @@ export const defaults = {
   deiphobe_timeout_seconds: process.env.NEXT_PUBLIC_DEIPHOBE_TIMEOUT_SECONDS ?? '120',
   deiphobe_private_mode: process.env.NEXT_PUBLIC_DEIPHOBE_PRIVATE_MODE ?? 'false',
   deiphobe_private_memory_root: process.env.NEXT_PUBLIC_DEIPHOBE_PRIVATE_MEMORY_ROOT ?? '',
+  deiphobe_chat_num_predict: process.env.NEXT_PUBLIC_DEIPHOBE_CHAT_NUM_PREDICT ?? '',
   deiphobe_speech_autoplay_enabled: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_AUTOPLAY_ENABLED ?? 'false',
   deiphobe_speech_provider: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_PROVIDER ?? 'xtts_stream',
   llamacpp_url: process.env.NEXT_PUBLIC_LLAMACPP_URL ?? 'http://127.0.0.1:8080',

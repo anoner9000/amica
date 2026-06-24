@@ -184,3 +184,90 @@ describe("deiphobeChat handler", () => {
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 });
+
+describe("deiphobe_chat_num_predict token budget", () => {
+  beforeEach(() => {
+    delete process.env.LLM_NUM_PREDICT;
+    mockConfigValues.deiphobe_chat_num_predict = "";
+  });
+
+  afterEach(() => {
+    delete process.env.LLM_NUM_PREDICT;
+    delete mockConfigValues.deiphobe_chat_num_predict;
+  });
+
+  test("unset config leaves subprocess env without LLM_NUM_PREDICT", async () => {
+    createMockChildProcess("ok");
+    const apiModule = await import("../src/pages/api/deiphobeChat");
+    const req = { method: "POST", body: { text: "hello" } } as any;
+    const res = createResponse();
+
+    await apiModule.default(req, res as any);
+    await flushEvents();
+
+    const spawnEnv = mockSpawn.mock.calls[0][2].env;
+    expect(spawnEnv).not.toHaveProperty("LLM_NUM_PREDICT");
+  });
+
+  test("valid config value passes LLM_NUM_PREDICT to subprocess", async () => {
+    mockConfigValues.deiphobe_chat_num_predict = "160";
+    createMockChildProcess("ok");
+    const apiModule = await import("../src/pages/api/deiphobeChat");
+    const req = { method: "POST", body: { text: "hello" } } as any;
+    const res = createResponse();
+
+    await apiModule.default(req, res as any);
+    await flushEvents();
+
+    const spawnEnv = mockSpawn.mock.calls[0][2].env;
+    expect(spawnEnv.LLM_NUM_PREDICT).toBe("160");
+    expect(res.statusCode).toBe(200);
+  });
+
+  test("explicit process.env.LLM_NUM_PREDICT takes priority over config value", async () => {
+    process.env.LLM_NUM_PREDICT = "50";
+    mockConfigValues.deiphobe_chat_num_predict = "160";
+    createMockChildProcess("ok");
+    const apiModule = await import("../src/pages/api/deiphobeChat");
+    const req = { method: "POST", body: { text: "hello" } } as any;
+    const res = createResponse();
+
+    await apiModule.default(req, res as any);
+    await flushEvents();
+
+    const spawnEnv = mockSpawn.mock.calls[0][2].env;
+    expect(spawnEnv.LLM_NUM_PREDICT).toBe("50");
+  });
+
+  test.each(["0", "-1", "abc", "1.5", "160abc"])(
+    "invalid config value %j is ignored and leaves subprocess env without LLM_NUM_PREDICT",
+    async (badValue) => {
+      mockConfigValues.deiphobe_chat_num_predict = badValue;
+      createMockChildProcess("ok");
+      const apiModule = await import("../src/pages/api/deiphobeChat");
+      const req = { method: "POST", body: { text: "hello" } } as any;
+      const res = createResponse();
+
+      await apiModule.default(req, res as any);
+      await flushEvents();
+
+      const spawnEnv = mockSpawn.mock.calls[0][2].env;
+      expect(spawnEnv).not.toHaveProperty("LLM_NUM_PREDICT");
+      expect(res.statusCode).toBe(200);
+    },
+  );
+
+  test("whitespace-only config is treated as unset", async () => {
+    mockConfigValues.deiphobe_chat_num_predict = "   ";
+    createMockChildProcess("ok");
+    const apiModule = await import("../src/pages/api/deiphobeChat");
+    const req = { method: "POST", body: { text: "hello" } } as any;
+    const res = createResponse();
+
+    await apiModule.default(req, res as any);
+    await flushEvents();
+
+    const spawnEnv = mockSpawn.mock.calls[0][2].env;
+    expect(spawnEnv).not.toHaveProperty("LLM_NUM_PREDICT");
+  });
+});
