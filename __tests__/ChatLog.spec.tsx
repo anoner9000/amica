@@ -259,6 +259,36 @@ describe("ChatLog — Deiphobe speech playback", () => {
     expect(getPlaybackMock().playDeiphobeSpeechUrls).not.toHaveBeenCalled();
   });
 
+  test("Restart retry clears the transcript only on the successful attempt", async () => {
+    mockSendConversationControl.mockRejectedValueOnce(new Error("fresh segment unavailable"));
+    await renderChatLog([
+      { role: "user", content: "Current exchange remains usable." },
+      { role: "assistant", content: "Still here." },
+    ]);
+
+    await act(async () => {
+      Simulate.click(container.querySelector("button[aria-label='Restart']")!);
+      await flush();
+    });
+
+    expect(mockSendConversationControl).toHaveBeenCalledTimes(1);
+    expect(mockSetMessageList).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Current exchange remains usable.");
+    expect(mockAlertError).toHaveBeenCalledWith("Restart failed", "fresh segment unavailable");
+
+    await act(async () => {
+      Simulate.click(container.querySelector("button[aria-label='Restart']")!);
+      await flush();
+    });
+
+    expect(mockSendConversationControl).toHaveBeenCalledTimes(2);
+    expect(mockSetMessageList).toHaveBeenCalledTimes(1);
+    expect(mockSetMessageList).toHaveBeenCalledWith([]);
+    expect(getSmartMocks().callSmartChunkRender).not.toHaveBeenCalled();
+    expect(getPlaybackMock().playDeiphobeSpeechUrls).not.toHaveBeenCalled();
+    expect(getSpeechJobsMock().createSpeechJob).not.toHaveBeenCalled();
+  });
+
   test("manual render forwards voice_posture to the render bridge", async () => {
     global.fetch = jest.fn<typeof fetch>().mockResolvedValueOnce({
       ok: true,
