@@ -49,6 +49,8 @@ import {
 import { getAssistantChatDisplayName } from "@/utils/chatDisplayName";
 import { resolveHostAwareLocalUrl } from "@/utils/hostAwareUrl";
 import { ChatContext } from "@/features/chat/chatContext";
+import { sendDeiphobeConversationSegmentControl } from "@/features/chat/deiphobeChat";
+import { AlertContext } from "@/features/alert/alertContext";
 import { saveAs } from 'file-saver';
 
 export const ChatLog = ({
@@ -58,7 +60,9 @@ export const ChatLog = ({
 }) => {
   const { t } = useTranslation();
   const { chat: bot } = useContext(ChatContext);
+  const { alert } = useContext(AlertContext);
   const { viewer } = useContext(ViewerContext);
+  const [restartPending, setRestartPending] = useState(false);
 
   const speechPreRenderEnabled =
     config("deiphobe_speech_prerender_enabled") === "true";
@@ -98,6 +102,26 @@ export const ChatLog = ({
   const handleResumeButtonClick = (num: number, newMessage: string) => {
     bot.setMessageList(messages.slice(0, num));
     bot.receiveMessageFromUser(newMessage,false);
+  };
+
+  const handleRestart = async () => {
+    if (restartPending) return;
+
+    setRestartPending(true);
+    try {
+      if (config("chatbot_backend") === "deiphobe") {
+        await sendDeiphobeConversationSegmentControl({
+          new_segment: true,
+          continue_previous_segment: false,
+        });
+      }
+      bot.setMessageList([]);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Restart failed";
+      alert.error("Restart failed", message);
+    } finally {
+      setRestartPending(false);
+    }
   };
 
   const txtFileInputRef = useRef<HTMLInputElement>(null);
@@ -178,9 +202,8 @@ export const ChatLog = ({
           type="button"
           aria-label={t("Restart")}
           className="bg-slate-600 hover:bg-slate-500 active:bg-slate-500 text-white rounded-lg text-sm p-1 text-center inline-flex items-center mr-2 shadow-xl"
-          onClick={() => {
-            bot.setMessageList([]);
-          }}
+          disabled={restartPending}
+          onClick={() => { void handleRestart(); }}
         >
           <ArrowPathIcon className="h-6 w-6" aria-hidden="true" />
           <div className="mx-2 font-bold">{t("Restart")}</div>

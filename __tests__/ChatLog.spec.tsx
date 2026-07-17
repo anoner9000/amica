@@ -7,6 +7,14 @@ import { Simulate } from "react-dom/test-utils";
 
 (window as any).HTMLElement.prototype.scrollIntoView = jest.fn();
 
+const mockSetMessageList = jest.fn();
+const mockReceiveMessageFromUser = jest.fn();
+const mockBubbleMessage = jest.fn();
+const mockSendConversationControl = jest.fn<
+  (control: { new_segment: boolean; continue_previous_segment: boolean }) => Promise<string>
+>();
+const mockAlertError = jest.fn();
+
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
@@ -16,6 +24,17 @@ jest.mock("../src/features/deiphobeSpeech/smartChunkSpeech", () => ({
   playSmartChunks: jest.fn(),
   stopSmartChunkPlayback: jest.fn(),
 }));
+
+jest.mock("../src/features/chat/deiphobeChat", () => ({
+  sendDeiphobeConversationSegmentControl: mockSendConversationControl,
+}));
+
+jest.mock("../src/features/alert/alertContext", () => {
+  const { createContext } = require("react");
+  return {
+    AlertContext: createContext({ alert: { error: mockAlertError } }),
+  };
+});
 
 jest.mock("../src/features/deiphobeSpeech/deiphobeSpeechPlaybackManager", () => ({
   playDeiphobeSpeechUrls: jest.fn(),
@@ -62,6 +81,7 @@ jest.mock("../src/utils/chatDisplayName", () => ({
 
 jest.mock("../src/utils/config", () => ({
   config: jest.fn().mockImplementation((key: string) => {
+    if (key === "chatbot_backend") return "deiphobe";
     if (key === "deiphobe_speech_chat_controls_enabled") return "true";
     return "false";
   }),
@@ -72,9 +92,9 @@ jest.mock("../src/features/chat/chatContext", () => {
   return {
     ChatContext: createContext({
       chat: {
-        setMessageList: jest.fn(),
-        receiveMessageFromUser: jest.fn(),
-        bubbleMessage: jest.fn(),
+        setMessageList: mockSetMessageList,
+        receiveMessageFromUser: mockReceiveMessageFromUser,
+        bubbleMessage: mockBubbleMessage,
       },
     }),
   };
@@ -147,6 +167,11 @@ describe("ChatLog — Deiphobe speech playback", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     global.fetch = jest.fn() as any;
+    mockSetMessageList.mockReset();
+    mockReceiveMessageFromUser.mockReset();
+    mockBubbleMessage.mockReset();
+    mockSendConversationControl.mockReset().mockResolvedValue("I started a fresh conversation.");
+    mockAlertError.mockReset();
     getSmartMocks().callSmartChunkRender.mockReset();
     getSmartMocks().playSmartChunks.mockReset();
     getSmartMocks().stopSmartChunkPlayback.mockReset();
@@ -178,6 +203,61 @@ describe("ChatLog — Deiphobe speech playback", () => {
       await flush();
     });
   }
+
+  test("Restart silently starts a fresh Deiphobe segment before clearing transient chat", async () => {
+    await renderChatLog([
+      { role: "user", content: "Keep the amber ring in mind." },
+      { role: "assistant", content: "I will." },
+    ]);
+
+    const restart = container.querySelector("button[aria-label='Restart']");
+    expect(restart).toBeTruthy();
+
+    await act(async () => {
+      Simulate.click(restart!);
+      await flush();
+    });
+
+    expect(mockSendConversationControl).toHaveBeenCalledTimes(1);
+    expect(mockSendConversationControl).toHaveBeenCalledWith({
+      new_segment: true,
+      continue_previous_segment: false,
+    });
+    expect(mockSetMessageList).toHaveBeenCalledTimes(1);
+    expect(mockSetMessageList).toHaveBeenCalledWith([]);
+    expect(mockReceiveMessageFromUser).not.toHaveBeenCalled();
+    expect(mockBubbleMessage).not.toHaveBeenCalled();
+    expect(mockAlertError).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(getSmartMocks().callSmartChunkRender).not.toHaveBeenCalled();
+    expect(getSmartMocks().playSmartChunks).not.toHaveBeenCalled();
+    expect(getPlaybackMock().playDeiphobeSpeechUrls).not.toHaveBeenCalled();
+    expect(getSpeechJobsMock().createSpeechJob).not.toHaveBeenCalled();
+  });
+
+  test("Restart failure leaves the current chat visible and reports the failure", async () => {
+    mockSendConversationControl.mockRejectedValueOnce(new Error("fresh segment unavailable"));
+    await renderChatLog([
+      { role: "user", content: "Current exchange remains usable." },
+      { role: "assistant", content: "Still here." },
+    ]);
+
+    await act(async () => {
+      Simulate.click(container.querySelector("button[aria-label='Restart']")!);
+      await flush();
+    });
+
+    expect(mockSendConversationControl).toHaveBeenCalledTimes(1);
+    expect(mockSetMessageList).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Current exchange remains usable.");
+    expect(container.textContent).toContain("Still here.");
+    expect(mockAlertError).toHaveBeenCalledWith("Restart failed", "fresh segment unavailable");
+    expect(mockReceiveMessageFromUser).not.toHaveBeenCalled();
+    expect(mockBubbleMessage).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(getSmartMocks().callSmartChunkRender).not.toHaveBeenCalled();
+    expect(getPlaybackMock().playDeiphobeSpeechUrls).not.toHaveBeenCalled();
+  });
 
   test("manual render forwards voice_posture to the render bridge", async () => {
     global.fetch = jest.fn<typeof fetch>().mockResolvedValueOnce({
