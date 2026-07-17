@@ -55,7 +55,9 @@ export const writeFile = (filePath: string, content: any): void => {
 };
 
 export type AtomicWritePhase =
+  | "target-stat"
   | "temporary-file"
+  | "temporary-file-mode"
   | "temporary-file-write"
   | "temporary-file-fsync"
   | "temporary-file-close"
@@ -118,8 +120,11 @@ export const writeFileAtomic = (
   try {
     mode = fs.statSync(filePath).mode & 0o777;
     exists = true;
-  } catch {
-    // Target does not exist yet; use the default mode.
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new AtomicPersistenceError("target-stat", false, error);
+    }
+    // The target genuinely does not exist; use the configured default mode.
   }
   const bytes = Buffer.from(serialized, "utf8");
   const nonce = `${process.pid}-${randomBytes(8).toString("hex")}`;
@@ -133,6 +138,8 @@ export const writeFileAtomic = (
   let targetReplaced = false;
   try {
     fd = fs.openSync(tmpPath, "wx", mode);
+    phase = "temporary-file-mode";
+    fs.fchmodSync(fd, mode);
     phase = "temporary-file-write";
     writeCompleteBytes(fd, bytes);
     phase = "temporary-file-fsync";

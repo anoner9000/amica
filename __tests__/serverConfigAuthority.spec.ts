@@ -37,13 +37,15 @@ function sha256(p: string): string {
 function loadModules() {
   let dataHelper: any;
   let dataHandler: any;
+  let apiHelper: any;
   jest.isolateModules(() => {
     process.env.AMICA_DATA_HANDLER_STORAGE_DIR = storageDir;
     process.env.NEXT_PUBLIC_DEVELOPMENT_BASE_URL = "http://localhost:3000";
     dataHelper = require("../src/features/externalAPI/dataHelper");
     dataHandler = require("../src/pages/api/dataHandler");
+    apiHelper = require("../src/features/externalAPI/utils/apiHelper");
   });
-  return { dataHelper, dataHandler };
+  return { apiHelper, dataHelper, dataHandler };
 }
 
 function mockRes() {
@@ -127,7 +129,8 @@ describe("server config authority", () => {
     expect(JSON.parse(fs.readFileSync(configPath, "utf8")).name).toBe("Dei");
   });
 
-  test("a successful save preserves the file mode", () => {
+  test("a successful save preserves an existing 0644 mode", () => {
+    fs.chmodSync(configPath, 0o644);
     const { dataHandler } = loadModules();
     const res = postConfig(
       dataHandler,
@@ -135,7 +138,24 @@ describe("server config authority", () => {
       sha256(configPath),
     );
     expect(res.statusCode).toBe(200);
-    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(configPath).mode & 0o777).toBe(0o644);
+  });
+
+  test("preserves an existing 0660 mode under a restrictive creation mask", () => {
+    fs.chmodSync(configPath, 0o660);
+    const { dataHandler } = loadModules();
+    const originalUmask = process.umask(0o777);
+    try {
+      const res = postConfig(
+        dataHandler,
+        { key: "name", value: "Dei" },
+        sha256(configPath),
+      );
+      expect(res.statusCode).toBe(200);
+      expect(fs.statSync(configPath).mode & 0o777).toBe(0o660);
+    } finally {
+      process.umask(originalUmask);
+    }
   });
 
   test("a stale revision is rejected 409 and the file is byte-identical", () => {
@@ -229,6 +249,7 @@ describe("server config authority", () => {
     const fdKinds = new Map<number, string>();
     const originalOpen = fs.openSync.bind(fs);
     const originalFsync = fs.fsyncSync.bind(fs);
+    const originalFchmod = fs.fchmodSync.bind(fs);
     const originalRename = fs.renameSync.bind(fs);
     const originalClose = fs.closeSync.bind(fs);
 
@@ -242,6 +263,10 @@ describe("server config authority", () => {
       events.push(`fsync:${fdKinds.get(fd)}`);
       return originalFsync(fd);
     });
+    jest.spyOn(fs, "fchmodSync").mockImplementation((fd, mode) => {
+      events.push(`fchmod:${fdKinds.get(fd)}`);
+      return originalFchmod(fd, mode);
+    });
     jest.spyOn(fs, "renameSync").mockImplementation((from, to) => {
       if (to === configPath) events.push("rename:target");
       return originalRename(from, to);
@@ -254,12 +279,89 @@ describe("server config authority", () => {
     const res = postConfig(dataHandler, { key: "name", value: "Durable" }, sha256(configPath));
     expect(res.statusCode).toBe(200);
     expect(events).toEqual([
+      "fchmod:temporary",
       "fsync:temporary",
       "fsync:backup",
       "rename:target",
       "fsync:directory",
       "close:directory",
     ]);
+  });
+
+  test("fchmod failure preserves original bytes and mode and removes temporary artifacts", () => {
+    const { dataHandler } = loadModules();
+    const originalBytes = fs.readFileSync(configPath);
+    const originalMode = fs.statSync(configPath).mode & 0o777;
+    const originalOpen = fs.openSync.bind(fs);
+    let temporaryFd: number | null = null;
+
+    jest.spyOn(fs, "openSync").mockImplementation(((p: fs.PathLike, flags: any, mode?: any) => {
+      const fd = originalOpen(p, flags, mode);
+      if (String(p).includes("config.json.tmp-")) temporaryFd = fd;
+      return fd;
+    }) as any);
+    jest.spyOn(fs, "fchmodSync").mockImplementation((fd) => {
+      if (fd === temporaryFd) throw new Error("simulated temporary fchmod failure");
+    });
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = postConfig(
+      dataHandler,
+      { key: "name", value: "Never authoritative" },
+      sha256(configPath),
+    );
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toMatchObject({
+      code: "CONFIG_PERSISTENCE_FAILED",
+      phase: "temporary-file-mode",
+      targetReplaced: false,
+    });
+    expect(fs.readFileSync(configPath).equals(originalBytes)).toBe(true);
+    expect(fs.statSync(configPath).mode & 0o777).toBe(originalMode);
+    expect(fs.readdirSync(storageDir).filter((name) => name.includes(".tmp-"))).toEqual([]);
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("Never authoritative");
+  });
+
+  test("a non-ENOENT target stat failure is a hard pre-rename failure", () => {
+    const { dataHandler } = loadModules();
+    const originalBytes = fs.readFileSync(configPath);
+    const revision = createHash("sha256").update(originalBytes).digest("hex");
+    const originalStat = fs.statSync.bind(fs);
+    jest.spyOn(fs, "statSync").mockImplementation(((p: fs.PathLike, ...args: any[]) => {
+      if (String(p) === configPath) {
+        const error = new Error("simulated target stat I/O failure") as NodeJS.ErrnoException;
+        error.code = "EIO";
+        throw error;
+      }
+      return (originalStat as any)(p, ...args);
+    }) as any);
+
+    const res = postConfig(
+      dataHandler,
+      { key: "name", value: "Never authoritative" },
+      revision,
+    );
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toMatchObject({
+      code: "CONFIG_PERSISTENCE_FAILED",
+      phase: "target-stat",
+      targetReplaced: false,
+    });
+    expect(fs.readFileSync(configPath).equals(originalBytes)).toBe(true);
+  });
+
+  test("ENOENT uses the configured default mode exactly", () => {
+    const { apiHelper } = loadModules();
+    const absentPath = path.join(storageDir, "new-config.json");
+    const originalUmask = process.umask(0o777);
+    try {
+      apiHelper.writeFileAtomic(absentPath, { name: "New" }, { defaultMode: 0o640 });
+      expect(fs.statSync(absentPath).mode & 0o777).toBe(0o640);
+    } finally {
+      process.umask(originalUmask);
+    }
   });
 
   test("closes the directory handle after directory fsync failure", () => {
