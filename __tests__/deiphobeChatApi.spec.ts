@@ -244,6 +244,30 @@ describe("deiphobeChat handler", () => {
     );
   });
 
+  test("returns non-2xx when the new-segment control child exits nonzero", async () => {
+    createMockChildProcessRaw(
+      "I started a fresh conversation.\n",
+      "FAIL: could not start a fresh conversation segment (write_failed)\n",
+      3,
+    );
+    const apiModule = await import("../src/pages/api/deiphobeChat");
+    const req = {
+      method: "POST",
+      body: {
+        text: null,
+        new_segment: true,
+        continue_previous_segment: false,
+      },
+    } as any;
+    const res = createResponse();
+
+    await apiModule.default(req, res as any);
+    await flushEvents();
+
+    expect(res.statusCode).toBe(500);
+    expect(JSON.parse(String(res.body))).toEqual({ error: "Deiphobe execution failed" });
+  });
+
   test.each([
     [{ new_segment: true, continue_previous_segment: true }, "Conversation segment controls conflict"],
     [{ new_segment: false, continue_previous_segment: false }, "Conversation segment control is missing"],
