@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
-import { config } from "@/utils/config";
+import { getAssistantChatDisplayName } from "@/utils/chatDisplayName";
 import { IconButton } from "./iconButton";
 
 export const AssistantText = ({ message }: { message: string }) => {
@@ -24,7 +24,7 @@ export const AssistantText = ({ message }: { message: string }) => {
           <div className="bg-white/70 rounded-lg backdrop-blur-lg shadow-lg">
             <div className="px-8 pr-1 py-3 bg-rose/90 rounded-t-lg text-white font-bold tracking-wider">
               <span className="p-4 bg-pink-600/80 rounded-lg rounded-tl-none rounded-tr-none shadow-sm">
-                {config('name').toUpperCase()}
+                {getAssistantChatDisplayName()}
               </span>
               <IconButton
                 iconName="24/FrameSize"
@@ -48,4 +48,3 @@ export const AssistantText = ({ message }: { message: string }) => {
     </div>
   );
 };
-

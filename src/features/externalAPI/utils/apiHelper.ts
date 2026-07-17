@@ -1,7 +1,7 @@
 import { randomBytes } from "crypto";
 import type { NextApiResponse } from "next";
 import fs from "fs";
-import { sseClients } from "@/pages/api/amicaHandler";
+import { sseClients } from "./sseClients";
 
 export interface ApiResponse {
   sessionId?: string;

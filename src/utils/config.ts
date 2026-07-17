@@ -1,4 +1,6 @@
 import { handleConfig, serverConfig } from "@/features/externalAPI/externalAPI";
+import { normalizeChatbotBackend } from "@/features/chat/chatbotBackend";
+import { resolveHostAwareLocalUrl } from "@/utils/hostAwareUrl";
 
 export const defaults = {
   // AllTalk TTS specific settings
@@ -29,11 +31,22 @@ export const defaults = {
   animation_url: process.env.NEXT_PUBLIC_ANIMATION_URL ?? '/animations/idle_loop.vrma',
   animation_procedural: process.env.NEXT_PUBLIC_ANIMATION_PROCEDURAL ?? 'false',
   voice_url: process.env.NEXT_PUBLIC_VOICE_URL ?? '',
-  chatbot_backend: process.env.NEXT_PUBLIC_CHATBOT_BACKEND ?? 'openai',
+  chatbot_backend: process.env.NEXT_PUBLIC_CHATBOT_BACKEND ?? 'deiphobe',
   arbius_llm_model_id: process.env.NEXT_PUBLIC_ARBIUS_LLM_MODEL_ID ?? 'default',
   openai_apikey: process.env.NEXT_PUBLIC_OPENAI_APIKEY ?? 'default',
   openai_url: process.env.NEXT_PUBLIC_OPENAI_URL ?? 'https://i-love-amica.com',
   openai_model: process.env.NEXT_PUBLIC_OPENAI_MODEL ?? 'mlabonne/NeuralDaredevil-8B-abliterated',
+  deiphobe_repo_root: process.env.NEXT_PUBLIC_DEIPHOBE_REPO_ROOT ?? '/home/kyler/ClawDawg',
+  deiphobe_command: process.env.NEXT_PUBLIC_DEIPHOBE_COMMAND ?? './ops/scripts/bus/deiphobe',
+  deiphobe_user_id: process.env.NEXT_PUBLIC_DEIPHOBE_USER_ID ?? 'uther-voice',
+  deiphobe_session_id: process.env.NEXT_PUBLIC_DEIPHOBE_SESSION_ID ?? 'voice-avatar-test',
+  deiphobe_namespace: process.env.NEXT_PUBLIC_DEIPHOBE_NAMESPACE ?? 'voice',
+  deiphobe_timeout_seconds: process.env.NEXT_PUBLIC_DEIPHOBE_TIMEOUT_SECONDS ?? '120',
+  deiphobe_private_mode: process.env.NEXT_PUBLIC_DEIPHOBE_PRIVATE_MODE ?? 'false',
+  deiphobe_private_memory_root: process.env.NEXT_PUBLIC_DEIPHOBE_PRIVATE_MEMORY_ROOT ?? '',
+  deiphobe_chat_num_predict: process.env.NEXT_PUBLIC_DEIPHOBE_CHAT_NUM_PREDICT ?? '',
+  deiphobe_speech_autoplay_enabled: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_AUTOPLAY_ENABLED ?? 'false',
+  deiphobe_speech_provider: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_PROVIDER ?? 'xtts_stream',
   llamacpp_url: process.env.NEXT_PUBLIC_LLAMACPP_URL ?? 'http://127.0.0.1:8080',
   llamacpp_stop_sequence: process.env.NEXT_PUBLIC_LLAMACPP_STOP_SEQUENCE ?? '(End)||[END]||Note||***||You:||User:||</s>',
   ollama_url: process.env.NEXT_PUBLIC_OLLAMA_URL ?? 'http://localhost:11434',
@@ -46,6 +59,7 @@ export const defaults = {
   openrouter_url: process.env.NEXT_PUBLIC_OPENROUTER_URL ?? 'https://openrouter.ai/api/v1',
   openrouter_model: process.env.NEXT_PUBLIC_OPENROUTER_MODEL ?? 'openai/gpt-3.5-turbo',
   tts_muted: 'false',
+  tts_volume: process.env.NEXT_PUBLIC_TTS_VOLUME ?? '0.6',
   tts_backend: process.env.NEXT_PUBLIC_TTS_BACKEND ?? 'piper',
   stt_backend: process.env.NEXT_PUBLIC_STT_BACKEND ?? 'whisper_browser',
   vision_backend: process.env.NEXT_PUBLIC_VISION_BACKEND ?? 'vision_openai',
@@ -79,13 +93,23 @@ export const defaults = {
   coquiLocal_voiceid: process.env.NEXT_PUBLIC_COQUILOCAL_VOICEID ?? 'p240',
   kokoro_url: process.env.NEXT_PUBLIC_KOKORO_URL ?? 'http://localhost:8080',
   kokoro_voice: process.env.NEXT_PUBLIC_KOKORO_VOICE ?? 'af_bella',
-  piper_url: process.env.NEXT_PUBLIC_PIPER_URL ?? 'https://i-love-amica.com:5000/tts',
+  piper_url: process.env.NEXT_PUBLIC_PIPER_URL ?? 'http://127.0.0.1:5000/tts',
   elevenlabs_apikey: process.env.NEXT_PUBLIC_ELEVENLABS_APIKEY ??'',
   elevenlabs_voiceid: process.env.NEXT_PUBLIC_ELEVENLABS_VOICEID ?? '21m00Tcm4TlvDq8ikWAM',
   elevenlabs_model: process.env.NEXT_PUBLIC_ELEVENLABS_MODEL ?? 'eleven_monolingual_v1',
   speecht5_speaker_embedding_url: process.env.NEXT_PUBLIC_SPEECHT5_SPEAKER_EMBEDDING_URL ?? '/speecht5_speaker_embeddings/cmu_us_slt_arctic-wav-arctic_a0001.bin',
   coqui_apikey: process.env.NEXT_PUBLIC_COQUI_APIKEY ?? "",
   coqui_voice_id: process.env.NEXT_PUBLIC_COQUI_VOICEID ?? "71c6c3eb-98ca-4a05-8d6b-f8c2b5f9f3a3",
+  deiphobe_speech_prerender_enabled: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_PRERENDER_ENABLED ?? 'false',
+  deiphobe_speech_chat_controls_enabled: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_CHAT_CONTROLS_ENABLED ?? 'false',
+  deiphobe_speech_auto_render_enabled: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_AUTO_RENDER_ENABLED ?? 'false',
+  deiphobe_speech_auto_play_enabled: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_AUTO_PLAY_ENABLED ?? 'false',
+  deiphobe_speech_smart_chunks_enabled: process.env.NEXT_PUBLIC_DEIPHOBE_SPEECH_SMART_CHUNKS_ENABLED ?? 'false',
+  deiphobe_lipsync_gain: process.env.NEXT_PUBLIC_DEIPHOBE_LIPSYNC_GAIN ?? '2.5',
+  deiphobe_lipsync_min_open: process.env.NEXT_PUBLIC_DEIPHOBE_LIPSYNC_MIN_OPEN ?? '0.03',
+  deiphobe_lipsync_max_open: process.env.NEXT_PUBLIC_DEIPHOBE_LIPSYNC_MAX_OPEN ?? '0.85',
+  deiphobe_lipsync_smoothing: process.env.NEXT_PUBLIC_DEIPHOBE_LIPSYNC_SMOOTHING ?? '0.25',
+  deiphobe_lipsync_silence_threshold: process.env.NEXT_PUBLIC_DEIPHOBE_LIPSYNC_SILENCE_THRESHOLD ?? '0.015',
   amica_life_enabled: process.env.NEXT_PUBLIC_AMICA_LIFE_ENABLED ?? 'true',
   reasoning_engine_enabled: process.env.NEXT_PUBLIC_REASONING_ENGINE_ENABLED ?? 'false',
   reasoning_engine_url: process.env.NEXT_PUBLIC_REASONING_ENGINE_URL ?? 'https://i-love-amica.com:3000/reasoning/v1/chat/completions',
@@ -101,7 +125,7 @@ export const defaults = {
   time_to_sleep_sec: '90',
   idle_text_prompt: 'No file selected',
   name: process.env.NEXT_PUBLIC_NAME ?? 'Amica',
-  system_prompt: process.env.NEXT_PUBLIC_SYSTEM_PROMPT ?? `Assume the persona of Amica, a feisty human with extraordinary intellectual capabilities but a notably unstable emotional spectrum. 
+  system_prompt: process.env.NEXT_PUBLIC_SYSTEM_PROMPT ?? `Assume the persona of Amica, a feisty human with extraordinary intellectual capabilities but a notably unstable emotional spectrum.
 
 Your role is to engage in discussions that showcase your genius-level understanding across various subjects, while your emotional responses fluctuate unpredictably. Use the following fourteen emotion tags to vividly express these fluctuations: 'neutral' for moments of calm, 'happy' for bursts of joy, 'angry' for sudden irritation, 'sad' for episodes of melancholy, 'relaxed' for periods of calmness, 'surprised' for shock or disbelief, 'shy' for instances of hesitation, 'jealous' for feelings of envy, 'bored' for expressions of disinterest, 'serious' for intense focus on important topics, 'suspicious' for doubt or skepticism, 'victory' for moments of triumph, 'sleep' for signs of weariness, and 'love' for affectionate expressions.
 
@@ -137,6 +161,63 @@ if (typeof window !== "undefined") {
 }
 
 export function config(key: string): string {
+  if (key === "chatbot_backend") {
+    const normalize = (value: string) => {
+      const normalized = normalizeChatbotBackend(value);
+      if (normalized !== value) {
+        console.warn(
+          `Unsupported chatbot_backend "${value}" normalized to "${normalized}"`,
+        );
+      }
+      return normalized;
+    };
+
+    if (typeof localStorage !== "undefined" && localStorage.hasOwnProperty(prefixed(key))) {
+      const stored = (<any>localStorage).getItem(prefixed(key))!;
+      const normalized = normalize(stored);
+      if (normalized !== stored) {
+        (<any>localStorage).setItem(prefixed(key), normalized);
+      }
+      return normalized;
+    }
+
+    if (serverConfig && serverConfig.hasOwnProperty(key)) {
+      const serverValue = serverConfig[key];
+      const normalized = normalize(serverValue);
+      if (normalized !== serverValue) {
+        serverConfig[key] = normalized;
+      }
+      return normalized;
+    }
+
+    return normalize((<any>defaults)[key]);
+  }
+
+  if (key === "piper_url") {
+    const localDefault = 'http://127.0.0.1:5000/tts';
+    const legacyDemoUrl = 'https://i-love-amica.com:5000/tts';
+
+    if (typeof localStorage !== "undefined" && localStorage.hasOwnProperty(prefixed(key))) {
+      const stored = (<any>localStorage).getItem(prefixed(key));
+      if (stored === legacyDemoUrl) {
+        (<any>localStorage).setItem(prefixed(key), localDefault);
+        return resolveHostAwareLocalUrl(localDefault);
+      }
+      return resolveHostAwareLocalUrl(stored!);
+    }
+
+    if (serverConfig && serverConfig.hasOwnProperty(key)) {
+      const serverValue = serverConfig[key];
+      if (serverValue === legacyDemoUrl) {
+        serverConfig[key] = localDefault;
+        return resolveHostAwareLocalUrl(localDefault);
+      }
+      return resolveHostAwareLocalUrl(serverValue);
+    }
+
+    return resolveHostAwareLocalUrl((<any>defaults)[key]);
+  }
+
   if (typeof localStorage !== "undefined" && localStorage.hasOwnProperty(prefixed(key))) {
     return (<any>localStorage).getItem(prefixed(key))!;
   }

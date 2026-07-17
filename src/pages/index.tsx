@@ -54,11 +54,13 @@ import { ChatContext } from "@/features/chat/chatContext";
 import { AlertContext } from "@/features/alert/alertContext";
 
 import { config, updateConfig } from '@/utils/config';
+import { resolveVoiceVolume, voiceVolumePercent } from "@/utils/voiceVolume";
 import { isTauri } from '@/utils/isTauri';
 import { langs } from '@/i18n/langs';
 import { VrmStoreProvider } from "@/features/vrmStore/vrmStoreContext";
 import { AmicaLifeContext } from "@/features/amicaLife/amicaLifeContext";
 import { ChatModeText } from "@/components/chatModeText";
+import { BackendStatusLine } from "@/components/backendStatusLine";
 
 import { TimestampedPrompt } from "@/features/amicaLife/eventHandler";
 import { handleChatLogs } from "@/features/externalAPI/externalAPI";
@@ -144,6 +146,7 @@ export default function Home() {
 
   // null indicates havent loaded config yet
   const [muted, setMuted] = useState<boolean|null>(null);
+  const [voiceVolume, setVoiceVolume] = useState("0.6");
   const [webcamEnabled, setWebcamEnabled] = useState(false);
   const [showLanguageSelector, setShowLanguageSelector] = useState(false);
 
@@ -164,6 +167,7 @@ export default function Home() {
     if (muted === null) {
       setMuted(config('tts_muted') === 'true');
     }
+    setVoiceVolume(resolveVoiceVolume(config("tts_volume")).toString());
 
     setShowArbiusIntroduction(config("show_arbius_introduction") === 'true');
 
@@ -197,8 +201,16 @@ export default function Home() {
   }, [viewer, videoRef, showStreamWindow]);
 
   function toggleTTSMute() {
-    updateConfig('tts_muted', config('tts_muted') === 'true' ? 'false' : 'true')
-    setMuted(config('tts_muted') === 'true')
+    const nextMuted = config("tts_muted") !== "true";
+    updateConfig("tts_muted", nextMuted ? "true" : "false");
+    setMuted(nextMuted);
+  }
+
+  function updateVoiceVolume(value: string) {
+    const normalized = resolveVoiceVolume(Number.parseInt(value, 10) / 100);
+    const next = normalized.toString();
+    setVoiceVolume(next);
+    updateConfig("tts_volume", next);
   }
 
   const toggleState = (
@@ -380,6 +392,8 @@ export default function Home() {
       
       <MessageInputContainer isChatProcessing={chatProcessing} />
 
+      {/* BackendStatusLine is shown in the debug pane; not shown in the main UI */}
+
       {/* main menu */}
       <div className="absolute z-10 m-2">
         <div className="grid grid-flow-col gap-[8px] place-content-end mt-2 bg-slate-800/40 rounded-md backdrop-blur-md shadow-sm">
@@ -422,6 +436,20 @@ export default function Home() {
                 label="mute"
               />
             )}
+
+            <label className="flex w-20 flex-col items-center gap-1 px-1 text-[10px] font-medium text-white/80">
+              <span>Voice {voiceVolumePercent(voiceVolume)}%</span>
+              <input
+                className="h-1 w-full accent-white"
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value={voiceVolumePercent(voiceVolume)}
+                aria-label="Voice volume"
+                onChange={(event) => updateVoiceVolume(event.target.value)}
+              />
+            </label>
 
             { webcamEnabled ? (
               <MenuButton

@@ -7,6 +7,50 @@ Navigate to [Piper](https://github.com/rhasspy/piper) and follow the setup instr
 
 ## Setting Up Piper Locally
 
+### Fastest Local WSL Path
+
+If you just want a browser-safe local HTTP server for Amica, use the small shim in this repo.
+
+1. Create a venv for Piper and install the Piper CLI:
+    ```bash
+    cd ~/ClawDawg/amica
+    python3 -m venv .venv-piper
+    source .venv-piper/bin/activate
+    pip install piper-tts
+    ```
+
+2. Start the local Piper-compatible HTTP server:
+    ```bash
+    npm run piper:start
+    ```
+
+3. Point Amica at the local endpoint:
+    ```text
+    Settings -> Text-to-Speech -> TTS Backend -> Piper
+    Settings -> Text-to-Speech -> Piper -> URL = http://127.0.0.1:5000/tts
+    ```
+
+4. Optional voice tuning:
+    - The local shim defaults to `PIPER_MODEL=en_US-amy-medium`.
+    - Set `PIPER_MODEL=en_US-amy-medium` or another Piper voice before starting the server.
+    - The shim sends CORS headers and returns `audio/wav`, so browser fetches work without a separate proxy.
+
+5. Quick test:
+    ```bash
+    npm run piper:health
+    npm run piper:smoke
+    ```
+
+6. Keep SpeechT5 as a fallback:
+    - If the Piper server is down, switch Amica back to `SpeechT5` in the TTS backend selector.
+
+### Startup notes
+
+- `npm run piper:start` is idempotent. If the shim is already healthy, it exits cleanly.
+- `npm run piper:stop` only targets `scripts/local_piper_server.py`.
+- If you see `Address already in use`, it usually means a local Piper shim is already bound to port `5000`. Keep it if `npm run piper:health` passes.
+- The known-good local voice is `en_US-amy-medium`.
+
 ### Method 1: Setup via Docker
 
 1. Clone the artibex/piper repository:

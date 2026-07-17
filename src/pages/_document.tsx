@@ -40,6 +40,20 @@ export default function Document() {
           href="https://fonts.googleapis.com/css2?family=M+PLUS+2&family=Montserrat&display=swap"
           rel="stylesheet"
         />
+        {/* Guard window.ethereum so injected wallet code (e.g. Brave iOS) cannot crash
+            the page when the provider object is absent. No web3 functionality in this app. */}
+        <Script id="ethereum-guard" strategy="beforeInteractive">{`
+          try {
+            if (typeof window !== 'undefined' && window.ethereum == null) {
+              Object.defineProperty(window, 'ethereum', {
+                value: {},
+                writable: true,
+                configurable: true,
+                enumerable: false,
+              });
+            }
+          } catch (_) {}
+        `}</Script>
         <Script
           src="/debugLogger.js"
           strategy="beforeInteractive"

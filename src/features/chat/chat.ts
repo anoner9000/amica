@@ -22,6 +22,9 @@ import {
 } from "./ollamaChat";
 import { getKoboldAiChatResponseStream } from "./koboldAiChat";
 import { getReasoingEngineChatResponseStream } from "./reasoiningEngineChat";
+import { getDeiphobeChatResponseStream } from "./deiphobeChat";
+import { localChatLatency } from "./localChatLatency";
+import { shouldUseReasoningEngine } from "./chatBackendRouting";
 
 import { rvc } from "@/features/rvc/rvc";
 import { coquiLocal } from "@/features/coquiLocal/coquiLocal";
@@ -37,6 +40,7 @@ import { AmicaLife } from "@/features/amicaLife/amicaLife";
 import { config, updateConfig } from "@/utils/config";
 import { cleanTalk } from "@/utils/cleanTalk";
 import { processResponse } from "@/utils/processResponse";
+import { resolveVoiceVolume } from "@/utils/voiceVolume";
 import { wait } from "@/utils/wait";
 import isDev from '@/utils/isDev';
 
@@ -44,16 +48,23 @@ import { isCharacterIdle, characterIdleTime, resetIdleTimer } from "@/utils/isId
 import { getOpenRouterChatResponseStream } from './openRouterChat';
 import { handleUserInput } from '../externalAPI/externalAPI';
 import { loadVRMAnimation } from '@/lib/VRMAnimation/loadVRMAnimation';
+import {
+  resolveAnimationStatePath,
+  selectAnimationStateFromExpression,
+} from "@/features/vrmViewer/animationState";
+import { isDeiphobeSpeechRenderBridgeConfigured } from "@/features/deiphobeSpeech/renderBridge";
 
 type Speak = {
   audioBuffer: ArrayBuffer | null;
   screenplay: Screenplay;
   streamIdx: number;
+  display?: boolean;
 };
 
 type TTSJob = {
   screenplay: Screenplay;
   streamIdx: number;
+  display?: boolean;
 };
 
 export class Chat {
@@ -93,6 +104,8 @@ export class Chat {
 
   public messageList: Message[];
 
+  private pendingMessageMeta: { voice_posture?: string; animation_state?: string };
+
   public currentStreamIdx: number;
 
   private eventSource: EventSource | null = null
@@ -113,6 +126,7 @@ export class Chat {
     this.thoughtMessage = "";
 
     this.messageList = [];
+    this.pendingMessageMeta = {};
     this.currentStreamIdx = 0;
 
     this.lastAwake = 0;
@@ -219,6 +233,7 @@ export class Chat {
           audioBuffer,
           screenplay: ttsJob.screenplay,
           streamIdx: ttsJob.streamIdx,
+          display: ttsJob.display,
         });
       } while (this.ttsJobs.size() > 0);
       await wait(50);
@@ -246,11 +261,17 @@ export class Chat {
           }
         }
 
-        this.bubbleMessage("assistant", speak.screenplay.text);
+        if (speak.display !== false) {
+          this.bubbleMessage("assistant", speak.screenplay.text);
+        }
 
         if (speak.audioBuffer) {
           this.setChatSpeaking!(true);
-          await this.viewer!.model?.speak(speak.audioBuffer, speak.screenplay);
+          await this.viewer!.model?.speak(
+            speak.audioBuffer,
+            speak.screenplay,
+            resolveVoiceVolume(config("tts_volume")),
+          );
           this.setChatSpeaking!(false);
           this.isAwake() ? this.updateAwake() : null;
         }
@@ -290,7 +311,9 @@ export class Chat {
         this.messageList!.push({
           role: "assistant",
           content: this.currentAssistantMessage,
+          ...this.pendingMessageMeta,
         });
+        this.pendingMessageMeta = {};
 
         this.currentAssistantMessage = "";
       }
@@ -310,7 +333,9 @@ export class Chat {
         this.messageList!.push({
           role: "assistant",
           content: this.currentAssistantMessage,
+          ...this.pendingMessageMeta,
         });
+        this.pendingMessageMeta = {};
 
         this.currentAssistantMessage = text;
         this.setAssistantMessage!(this.currentAssistantMessage);
@@ -319,7 +344,9 @@ export class Chat {
           this.messageList!.push({
             role: "assistant",
             content: this.currentAssistantMessage,
+            ...this.pendingMessageMeta,
           });
+          this.pendingMessageMeta = {};
         }
         this.currentAssistantMessage = text;
         this.setAssistantMessage!(this.currentAssistantMessage);
@@ -342,7 +369,7 @@ export class Chat {
 
       this.setChatLog!([
         ...this.messageList!,
-        { role: "assistant", content: this.currentAssistantMessage },
+        { role: "assistant", content: this.currentAssistantMessage, ...this.pendingMessageMeta },
       ]);
     }
 
@@ -373,9 +400,10 @@ export class Chat {
 
   // this happens either from text or from voice / whisper completion
   public async receiveMessageFromUser(message: string, amicaLife: boolean) {
-    if (message === null || message === "") {
+    if (message === null || message.trim() === "") {
       return;
     }
+    message = message.trim();
 
     console.time("performance_interrupting");
     console.debug("interrupting...");
@@ -390,7 +418,9 @@ export class Chat {
       // For external API
       await handleUserInput(message);
 
-      this.amicaLife?.receiveMessageFromUser(message);
+      if (config("chatbot_backend") !== "deiphobe") {
+        this.amicaLife?.receiveMessageFromUser(message);
+      }
 
       if (!/\[.*?\]/.test(message)) {
         message = `[neutral] ${message}`;
@@ -433,17 +463,23 @@ export class Chat {
 
         // Handle the message based on its type
         switch (type) {
-          case 'normal':
-            console.log('Normal message received:', data);
+          case 'normal': {
+            const normalText = typeof data === "string" ? data : (data?.text ?? "");
+            this.pendingMessageMeta = typeof data === "object" && data !== null ? {
+              voice_posture: data.voice_posture || undefined,
+              animation_state: data.animation_state || undefined,
+            } : {};
+            console.log('Normal message received:', normalText);
             const messages: Message[] = [
               { role: "system", content: config("system_prompt") },
               ...this.messageList!,
-              { role: "user", content: data},
+              { role: "user", content: normalText },
             ];
-            let stream = await getEchoChatResponseStream(messages);
+            const stream = await getEchoChatResponseStream(messages);
             this.streams.push(stream);
             this.handleChatResponseStream();
             break;
+          }
           
           case 'animation':
             console.log('Animation data received:', data);
@@ -453,6 +489,11 @@ export class Chat {
             }
             this.viewer?.model?.playAnimation(animation,data);
             requestAnimationFrame(() => { this.viewer?.resetCameraLerp(); });
+            break;
+
+          case 'animation_state':
+            console.log('Animation state received:', data);
+            await this.playAnimationState(data);
             break;
 
           case 'playback':
@@ -501,7 +542,7 @@ export class Chat {
     this.eventSource.onerror = (error) => {
       console.error('Error in SSE connection:', error);
       this.eventSource?.close();
-      setTimeout(this.initSSE, 500);
+      setTimeout(() => this.initSSE(), 500);
     };
   }
 
@@ -543,6 +584,10 @@ export class Chat {
     const streamIdx = this.currentStreamIdx;
     this.setChatProcessing!(true);
 
+    if (config("chatbot_backend") === "deiphobe") {
+      return await this.handleDeiphobeChatResponseStream(streamIdx);
+    }
+
     console.time("chat stream processing");
     let reader = this.streams[this.streams.length - 1].getReader();
     this.readers.push(reader);
@@ -553,6 +598,7 @@ export class Chat {
     let isThinking = false;
     let rolePlay = "";
     let receivedMessage = "";
+    let animationStateTriggered = false;
 
     let firstTokenEncountered = false;
     let firstSentenceEncountered = false;
@@ -596,6 +642,16 @@ export class Chat {
               });
             } 
 
+            if (!animationStateTriggered) {
+              const animationState = selectAnimationStateFromExpression(
+                aiTalks[0]?.expression,
+              );
+              if (animationState) {
+                animationStateTriggered = true;
+                void this.playAnimationState(animationState);
+              }
+            }
+
             // thought bubble
             this.thoughtBubbleMessage(isThinking, aiTalks[0].text);
             
@@ -633,6 +689,60 @@ export class Chat {
     }
 
     return aiTextLog;
+  }
+
+  private async handleDeiphobeChatResponseStream(streamIdx: number) {
+    console.time("chat stream processing");
+    let reader = this.streams[this.streams.length - 1].getReader();
+    this.readers.push(reader);
+    let receivedMessage = "";
+
+    try {
+      const decoder = new TextDecoder("utf-8");
+      while (true) {
+        if (this.currentStreamIdx !== streamIdx) {
+          console.log("wrong stream idx");
+          break;
+        }
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        receivedMessage += decoder.decode(value, { stream: true });
+        localChatLatency.recordFirstChunk();
+      }
+      receivedMessage += decoder.decode();
+
+      const reply = receivedMessage.trim();
+      if (reply && this.currentStreamIdx === streamIdx) {
+        this.bubbleMessage("assistant", reply);
+        localChatLatency.recordCommitted(reply.length);
+        if (!isDeiphobeSpeechRenderBridgeConfigured()) {
+          const screenplay = textsToScreenplay([`[neutral] ${reply}`])[0];
+          this.ttsJobs.enqueue({
+            screenplay,
+            streamIdx,
+            display: false,
+          });
+        } else {
+          console.debug("Deiphobe speech render bridge configured; skipping legacy frontend TTS path.");
+        }
+      }
+    } catch (e: any) {
+      const errMsg = e.toString();
+      this.bubbleMessage!("assistant", errMsg);
+      console.error(errMsg);
+    } finally {
+      if (!reader.closed) {
+        reader.releaseLock();
+      }
+      console.timeEnd("chat stream processing");
+      if (streamIdx === this.currentStreamIdx) {
+        this.setChatProcessing!(false);
+      }
+    }
+
+    return receivedMessage.trim();
   }
 
   async fetchAudio(talk: Talk): Promise<ArrayBuffer | null> {
@@ -714,7 +824,7 @@ export class Chat {
     const systemPrompt = messages.find((msg) => msg.role === "system")!;
     const conversationMessages = messages.filter((msg) => msg.role !== "system");
 
-    if (config("reasoning_engine_enabled") === "true") {
+    if (shouldUseReasoningEngine(chatbotBackend, config("reasoning_engine_enabled"))) {
       return getReasoingEngineChatResponseStream(systemPrompt, conversationMessages)
     } 
 
@@ -731,6 +841,8 @@ export class Chat {
         return getOllamaChatResponseStream(messages);
       case "koboldai":
         return getKoboldAiChatResponseStream(messages);
+      case "deiphobe":
+        return getDeiphobeChatResponseStream(messages);
       case 'openrouter':
         return getOpenRouterChatResponseStream(messages);
     }
@@ -806,6 +918,38 @@ export class Chat {
     } catch (e: any) {
       console.error("getVisionResponse", e.toString());
       this.alert?.error("Failed to get vision response", e.toString());
+    }
+  }
+
+  private async playAnimationState(animationState: string | null | undefined) {
+    if (!this.viewer?.model) {
+      console.warn("Skipping animation_state playback because the model is not ready.");
+      return;
+    }
+
+    const resolvedPath = await resolveAnimationStatePath(animationState);
+
+    try {
+      const animation = await loadVRMAnimation(resolvedPath);
+      if (!animation) {
+        console.warn(
+          `No VRM animation could be loaded for state "${animationState}" (${resolvedPath}).`,
+        );
+        return;
+      }
+
+      await this.viewer.model.playAnimation(
+        animation,
+        resolvedPath.split("/").pop() || resolvedPath,
+      );
+      requestAnimationFrame(() => {
+        this.viewer?.resetCameraLerp();
+      });
+    } catch (error) {
+      console.warn(
+        `Failed to play animation state "${animationState}" from ${resolvedPath}:`,
+        error,
+      );
     }
   }
 }

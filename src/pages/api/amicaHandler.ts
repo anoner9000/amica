@@ -4,11 +4,11 @@ import { config } from "@/utils/config";
 import { handleConfig, handleSubconscious } from "@/features/externalAPI/externalAPI";
 
 import { generateSessionId, sendError, apiLogEntry, ApiResponse } from "@/features/externalAPI/utils/apiHelper";
+import { sseClients } from "@/features/externalAPI/utils/sseClients";
 import { requestMemory, requestLogs, requestUserInputMessages, requestChatHistory } from "@/features/externalAPI/utils/requestHandler";
 import { processNormalChat, triggerAmicaActions, updateSystemPrompt } from "@/features/externalAPI/processors/chatProcessor";
 
 export const apiLogs: apiLogEntry[] = [];
-export const sseClients: Array<{ res: NextApiResponse }> = [];
 
 // Main Amica Handler
 export default async function handler(
@@ -87,4 +87,3 @@ const handleSSEConnection = (
     res.end();
   });
 };
-

@@ -19,9 +19,6 @@ import { config } from "@/utils/config";
 import { WaveFile } from "wavefile";
 import { AmicaLifeContext } from "@/features/amicaLife/amicaLifeContext";
 import { AudioControlsContext } from "@/features/moshi/components/audioControlsContext";
-import {
-  sendDeiphobeConversationSegmentControl,
-} from "@/features/chat/deiphobeChat";
 // next.config.js emits these VAD assets into the Next static chunk directory.
 const VAD_WORKLET_URL = "/_next/static/chunks/vad.worklet.bundle.min.js";
 const VAD_MODEL_URL = "/_next/static/chunks/silero_vad.onnx";
@@ -50,8 +47,6 @@ export default function MessageInput({
   const { amicaLife } = useContext(AmicaLifeContext);
   const { audioControls: moshi } = useContext(AudioControlsContext);
   const [moshiMuted, setMoshiMuted] = useState(moshi.isMuted());
-  const [segmentControlStatus, setSegmentControlStatus] = useState("");
-  const [segmentControlBusy, setSegmentControlBusy] = useState(false);
 
   const vad = useMicVAD({
     startOnLoad: false,
@@ -244,28 +239,6 @@ export default function MessageInput({
     setUserMessage("");
   }
 
-  async function runConversationControl(
-    control: { new_segment: boolean; continue_previous_segment: boolean },
-    statusText: string,
-  ) {
-    if (isChatProcessing || segmentControlBusy) {
-      return;
-    }
-
-    setSegmentControlBusy(true);
-    try {
-      bot.updateAwake();
-      const reply = await sendDeiphobeConversationSegmentControl(control);
-      setSegmentControlStatus(reply || statusText);
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : statusText;
-      setSegmentControlStatus(message);
-      alert.error("Conversation control failed", message);
-    } finally {
-      setSegmentControlBusy(false);
-    }
-  }
-
   return (
     <div className="fixed bottom-2 z-20 w-full">
       <div className="mx-auto max-w-4xl rounded-lg border-0 p-2 backdrop-blur-lg">
@@ -331,10 +304,9 @@ export default function MessageInput({
             <IconButton
               iconName="24/Send"
               className="ml-2 bg-secondary hover:bg-secondary-hover active:bg-secondary-press disabled:bg-secondary-disabled"
-              isProcessing={isChatProcessing || segmentControlBusy || transcriber.isBusy}
+              isProcessing={isChatProcessing || transcriber.isBusy}
               disabled={
                 isChatProcessing ||
-                segmentControlBusy ||
                 !userMessage.trim() ||
                 transcriber.isModelLoading ||
                 config("chatbot_backend") === "moshi"
@@ -342,39 +314,6 @@ export default function MessageInput({
               onClick={clickedSendButton}
             />
           </div>
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-2 px-1 text-xs">
-          <button
-            type="button"
-            className="rounded-md border border-white/20 bg-secondary px-3 py-2 font-semibold text-white shadow-sm transition hover:bg-secondary-hover active:bg-secondary-press disabled:bg-secondary-disabled disabled:opacity-60"
-            disabled={isChatProcessing || segmentControlBusy}
-            onClick={() => {
-              void runConversationControl(
-                { new_segment: true, continue_previous_segment: false },
-                "I started a fresh conversation.",
-              );
-            }}
-          >
-            New Conversation
-          </button>
-          <button
-            type="button"
-            className="rounded-md border border-white/20 bg-secondary px-3 py-2 font-semibold text-white shadow-sm transition hover:bg-secondary-hover active:bg-secondary-press disabled:bg-secondary-disabled disabled:opacity-60"
-            disabled={isChatProcessing || segmentControlBusy}
-            onClick={() => {
-              void runConversationControl(
-                { new_segment: false, continue_previous_segment: true },
-                "I continued the previous conversation.",
-              );
-            }}
-          >
-            Continue Previous
-          </button>
-          {segmentControlStatus !== "" && (
-            <div className="min-h-5 flex-1 text-right text-white/80" aria-live="polite">
-              {segmentControlStatus}
-            </div>
-          )}
         </div>
       </div>
     </div>

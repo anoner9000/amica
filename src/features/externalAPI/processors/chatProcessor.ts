@@ -2,6 +2,7 @@ import { askLLM } from "@/utils/askLlm";
 import { config } from "@/utils/config";
 import { handleSocialMediaActions } from "@/features/externalAPI/utils/socialMediaHandler";
 import { sendToClients } from "@/features/externalAPI/utils/apiHelper";
+import { selectAnimationStateFromPayload } from "@/features/vrmViewer/animationState";
 
 
 export const processNormalChat = async (message: string): Promise<string> => {
@@ -9,20 +10,38 @@ export const processNormalChat = async (message: string): Promise<string> => {
 };
 
 export const triggerAmicaActions = async (payload: any) => {
-  const { text, socialMedia, playback, reprocess, animation } = payload;
+  const {
+    text,
+    socialMedia,
+    playback,
+    reprocess,
+    animation,
+    animation_state,
+    voice_posture,
+  } = payload;
+  const resolvedSocialMedia = socialMedia ?? "none";
 
   if (text) {
     const message = reprocess
       ? await askLLM(config("system_prompt"), text, null)
       : text;
-    await handleSocialMediaActions(message, socialMedia);
+    await handleSocialMediaActions(message, resolvedSocialMedia, { voice_posture, animation_state });
+  }
+
+  const selectedAnimationState = selectAnimationStateFromPayload({
+    animation_state,
+    voice_posture,
+  });
+
+  if (selectedAnimationState) {
+    sendToClients({ type: "animation_state", data: selectedAnimationState });
   }
 
   if (playback) {
     sendToClients({ type: "playback", data: 10000 });
   }
 
-  if (animation) {
+  if (animation && !selectedAnimationState) {
     sendToClients({ type: "animation", data: animation });
   }
 };

@@ -1,5 +1,4 @@
 import { config, defaults, prefixed } from "@/utils/config";
-import isDev from "@/utils/isDev";
 import {
   MAX_STORAGE_TOKENS,
   TimestampedPrompt,
@@ -69,7 +68,7 @@ export async function handleConfig(
   type: string,
   data?: Record<string, string>,
 ) {
-  if (!isDev) {
+  if (process.env.NODE_ENV !== "development") {
     return;
   }
 
@@ -111,7 +110,7 @@ export async function handleConfig(
 }
 
 export async function handleUserInput(message: string) {
-  if (!isDev || config("external_api_enabled") !== "true") {
+  if (process.env.NODE_ENV !== "development" || config("external_api_enabled") !== "true") {
     return;
   }
 
@@ -122,11 +121,11 @@ export async function handleUserInput(message: string) {
       systemPrompt: config("system_prompt"),
       message: message,
     }),
-  });
+  }).catch(() => {});
 }
 
 export async function handleChatLogs(messages: Message[]) {
-  if (!isDev || config("external_api_enabled") !== "true") {
+  if (process.env.NODE_ENV !== "development" || config("external_api_enabled") !== "true") {
     return;
   }
 
@@ -134,13 +133,13 @@ export async function handleChatLogs(messages: Message[]) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(messages),
-  });
+  }).catch(() => {});
 }
 
 export async function handleSubconscious(
   timestampedPrompt: TimestampedPrompt,
 ): Promise<any> {
-  if (!isDev || config("external_api_enabled") !== "true") {
+  if (process.env.NODE_ENV !== "development" || config("external_api_enabled") !== "true") {
     return;
   }
 

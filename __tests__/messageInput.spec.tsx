@@ -4,7 +4,9 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { Simulate } from "react-dom/test-utils";
 
-const mockSendConversationControl = jest.fn(() => Promise.resolve("I started a fresh conversation."));
+const mockSendConversationControl = jest.fn<
+  (control: { new_segment: boolean; continue_previous_segment: boolean }) => Promise<string>
+>(() => Promise.resolve("I started a fresh conversation."));
 const mockReceiveMessageFromUser = jest.fn();
 const mockUpdateAwake = jest.fn();
 const mockAlertError = jest.fn();
@@ -29,7 +31,7 @@ jest.mock("../src/hooks/useTranscriber", () => ({
 }));
 
 jest.mock("../src/features/chat/deiphobeChat", () => ({
-  sendDeiphobeConversationSegmentControl: (...args: unknown[]) => mockSendConversationControl(...args),
+  sendDeiphobeConversationSegmentControl: mockSendConversationControl,
 }));
 
 jest.mock("../src/components/iconButton", () => ({
@@ -106,7 +108,7 @@ function flush() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-describe("MessageInput conversation controls", () => {
+describe("MessageInput", () => {
   const originalActEnv = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
@@ -181,43 +183,15 @@ describe("MessageInput conversation controls", () => {
     });
   }
 
-  test("new conversation sends typed flags and shows the deterministic status", async () => {
+  test("keeps lifecycle controls out of the ordinary composer", async () => {
     await renderMessageInput();
-    const buttons = Array.from(container.querySelectorAll("button"));
-    const newConversationButton = buttons.find((button) => button.textContent === "New Conversation");
-    expect(newConversationButton).toBeTruthy();
+    const input = container.querySelector("input[type='text']") as HTMLInputElement;
 
-    await act(async () => {
-      Simulate.click(newConversationButton!);
-      await flush();
-    });
-
-    expect(mockSendConversationControl).toHaveBeenCalledWith({
-      new_segment: true,
-      continue_previous_segment: false,
-    });
+    expect(input.value).toBe("hello there");
+    expect(container.textContent).not.toContain("New Conversation");
+    expect(container.textContent).not.toContain("Continue Previous");
+    expect(mockSendConversationControl).not.toHaveBeenCalled();
     expect(mockReceiveMessageFromUser).not.toHaveBeenCalled();
-    expect(mockUpdateAwake).toHaveBeenCalled();
-    expect(container.textContent).toContain("I started a fresh conversation.");
-  });
-
-  test("continue previous sends typed flags without touching the ordinary send path", async () => {
-    await renderMessageInput("ordinary text");
-    const buttons = Array.from(container.querySelectorAll("button"));
-    const continueButton = buttons.find((button) => button.textContent === "Continue Previous");
-    expect(continueButton).toBeTruthy();
-
-    await act(async () => {
-      Simulate.click(continueButton!);
-      await flush();
-    });
-
-    expect(mockSendConversationControl).toHaveBeenCalledWith({
-      new_segment: false,
-      continue_previous_segment: true,
-    });
-    expect(mockReceiveMessageFromUser).not.toHaveBeenCalled();
-    expect(container.textContent).toContain("I started a fresh conversation.");
   });
 
   test("ordinary send remains unchanged", async () => {
@@ -232,5 +206,7 @@ describe("MessageInput conversation controls", () => {
 
     expect(mockReceiveMessageFromUser).toHaveBeenCalledWith("ordinary text", false);
     expect(mockSendConversationControl).not.toHaveBeenCalled();
+    expect(mockReceiveMessageFromUser).not.toHaveBeenCalledWith("!conversation new", false);
+    expect(mockReceiveMessageFromUser).not.toHaveBeenCalledWith("!conversation continue", false);
   });
 });

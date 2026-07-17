@@ -1,9 +1,14 @@
+import { useContext } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {  BasicPage, FormRow } from './common';
 import { IconButton } from "@/components/iconButton";
 import { SwitchBox } from '@/components/switchBox';
 import { updateConfig } from "@/utils/config";
+import { SpeechDebugPanel } from '@/features/deiphobeSpeech/SpeechDebugPanel';
+import { ViewerContext } from '@/features/vrmViewer/viewerContext';
+import { resolveAnimationStatePath } from '@/features/vrmViewer/animationState';
+import { loadVRMAnimation } from '@/lib/VRMAnimation/loadVRMAnimation';
 
 const mtoonDebugModes = [
   {key: "none",          label: "None"},
@@ -43,6 +48,22 @@ export function DeveloperPage({
   setSettingsUpdated: (updated: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const { viewer } = useContext(ViewerContext);
+
+  async function handleDispatchCue(voiceMode: string): Promise<void> {
+    if (!viewer?.model) {
+      console.warn("Avatar cue dispatch skipped: model is not ready.");
+      return;
+    }
+    const resolvedPath = await resolveAnimationStatePath(voiceMode);
+    const animation = await loadVRMAnimation(resolvedPath);
+    if (!animation) {
+      console.warn(`No VRM animation loaded for voice_mode "${voiceMode}" (${resolvedPath}).`);
+      return;
+    }
+    await viewer.model.playAnimation(animation, resolvedPath.split("/").pop() || resolvedPath);
+    requestAnimationFrame(() => { viewer.resetCameraLerp(); });
+  }
 
   return (
     <BasicPage
@@ -111,6 +132,7 @@ export function DeveloperPage({
           </FormRow>
         </li>
       </ul>
+      <SpeechDebugPanel onDispatchCue={handleDispatchCue} />
     </BasicPage>
   );
 }

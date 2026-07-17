@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
-import { config } from "@/utils/config";
+import { getAssistantChatDisplayName } from "@/utils/chatDisplayName";
 import { IconButton } from "./iconButton";
 import { useTranslation } from "react-i18next";
 import { Message } from "@/features/chat/messages";
@@ -74,7 +74,7 @@ function Chat({
                             "p-4 rounded-lg rounded-tl-none rounded-tr-none shadow-sm",
                             role === "assistant" ? "bg-pink-600/80" : "bg-cyan-600/80",
                         )}>
-                            {role === "assistant" && config('name').toUpperCase()}
+                            {role === "assistant" && getAssistantChatDisplayName()}
                             {role === "user" && t("YOU")}
                         </span>
 

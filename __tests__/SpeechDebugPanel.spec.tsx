@@ -1,0 +1,838 @@
+import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
+import React from "react";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { Simulate } from "react-dom/test-utils";
+import { SpeechDebugPanel, mockSpeechPayload } from "../src/features/deiphobeSpeech/SpeechDebugPanel";
+
+jest.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string) => fallback ?? _key,
+  }),
+}));
+
+jest.mock("../src/utils/config", () => ({
+  config: jest.fn((key: string) => {
+    if (key === "tts_muted") return "false";
+    if (key === "tts_volume") return "0.6";
+    return "false";
+  }),
+  updateConfig: jest.fn(),
+}));
+
+jest.mock("../src/components/settings/common", () => ({
+  BasicPage: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  FormRow: ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <label>
+      <span>{label}</span>
+      {children}
+    </label>
+  ),
+}));
+
+jest.mock("../src/components/switchBox", () => ({
+  SwitchBox: ({ label }: { label: string }) => <button type="button">{label}</button>,
+}));
+
+jest.mock("../src/features/vrmViewer/viewerContext", () => {
+  const { createContext } = require("react");
+  return {
+    ViewerContext: createContext({ viewer: { model: undefined, resetCameraLerp: () => {} } }),
+  };
+});
+
+jest.mock("../src/features/vrmViewer/animationState", () => ({
+  resolveAnimationStatePath: jest.fn().mockResolvedValue("/animations/Relax.vrma"),
+  selectAnimationStateFromExpression: jest.fn().mockReturnValue(null),
+  selectAnimationStateFromPayload: jest.fn().mockReturnValue(null),
+}));
+
+jest.mock("../src/lib/VRMAnimation/loadVRMAnimation", () => ({
+  loadVRMAnimation: jest.fn().mockResolvedValue(null),
+}));
+
+function flush() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+describe("Deiphobe speech debug panel", () => {
+  const originalFetch = global.fetch;
+  const originalActEnvironment = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+
+  beforeEach(() => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    global.fetch = jest.fn() as any;
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    global.fetch = originalFetch;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = originalActEnvironment;
+  });
+
+  async function renderDeveloperPage() {
+    const { DeveloperPage } = await import("../src/components/settings/DeveloperPage");
+
+    await act(async () => {
+      root.render(
+        <DeveloperPage
+          debugGfx={false}
+          setDebugGfx={jest.fn()}
+          mtoonDebugMode="none"
+          setMtoonDebugMode={jest.fn()}
+          mtoonMaterialType="mtoon"
+          setMtoonMaterialType={jest.fn()}
+          useWebGPU={false}
+          setUseWebGPU={jest.fn()}
+          setSettingsUpdated={jest.fn()}
+        />,
+      );
+    });
+  }
+
+  test("renders static metadata-only payload in developer page by default", async () => {
+    await renderDeveloperPage();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Deiphobe Speech Debug");
+    expect(container.textContent).toContain("Visible Text");
+    expect(container.textContent).toContain("Spoken Text");
+    expect(container.textContent).toContain("I held the line.");
+    expect(container.textContent).toContain("voice_mode");
+    expect(container.textContent).toContain("warm_recall");
+    expect(container.textContent).toContain("piper_render_request");
+    expect(container.textContent).toContain("Render command preview");
+    expect(container.textContent).toContain("python3 ops/scripts/deiphobe/speech_render_dry_run.py");
+    expect(container.textContent).toContain("--render");
+    expect(container.textContent).toContain("--out /tmp/deiphobe-speech-test/debug.wav");
+    expect(container.textContent).toContain("avatar_cues");
+    expect(container.textContent).toContain("quiet_private");
+    expect(container.textContent).toContain("Preview only. This panel does not render or autoplay audio.");
+    expect(container.textContent).toContain("Metadata only. No autoplay. No reply mutation.");
+    expect(container.querySelector("audio")).toBeNull();
+  });
+
+  test("clicking fetch sends the expected POST body and updates the payload", async () => {
+    const livePayload = {
+      visible_text: "Hello from the bridge.",
+      spoken_text: "Hello from the bridge.",
+      speech_plan: {
+        text: "Hello from the bridge.",
+        visible_text: "Hello from the bridge.",
+        spoken_text: "Hello from the bridge.",
+        posture: "social_continuity",
+        signature_phrase: null,
+        voice_mode: "warm",
+        pace: "slow-normal",
+        volume: "low_medium",
+        pitch_shape: "soft_falling",
+        rate: 1,
+        pause_scale: 1,
+        pause_before_ms: 0,
+        pauses: [],
+        emphasis: [],
+        pronunciation_overrides: [],
+        voice_mode_config: {
+          mode: "warm",
+          rate: 1,
+          volume: "low_medium",
+          pause_scale: 1,
+          pitch_shape: "soft_falling",
+        },
+        signature_phrase_config: {
+          phrase: "",
+          voice_mode: null,
+          pace: null,
+          pitch_shape: null,
+          pause_before_ms: 0,
+          emphasis: [],
+        },
+        safety: {
+          content_unchanged: true,
+          assertion_added: false,
+        },
+      },
+      piper_render_request: {
+        text: "Hello from the bridge.",
+        spoken_text: "Hello from the bridge.",
+        render_text: "Hello from the bridge.",
+        voice_mode: "warm",
+        rate: 1,
+        volume: "low_medium",
+        pause_scale: 1,
+        pause_before_ms: 0,
+        ignored_metadata: [],
+      },
+      avatar_cues: {
+        voice_mode: "warm",
+        pace: "slow-normal",
+        pause_before_ms: 0,
+        emphasis: [],
+        private_mode: true,
+        quiet_private: true,
+        signature_phrase: null,
+      },
+    };
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => livePayload,
+    });
+
+    await renderDeveloperPage();
+
+    const textArea = container.querySelector("textarea[name='text']") as HTMLTextAreaElement;
+    const postureInput = container.querySelector("input[name='posture']") as HTMLInputElement;
+    const operatorInput = container.querySelector("input[name='operator_name']") as HTMLInputElement;
+    const privateMode = container.querySelector("input[name='private_mode']") as HTMLInputElement;
+    const includeRender = container.querySelector("input[name='include_render_request']") as HTMLInputElement;
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find((element) =>
+      element.textContent?.includes("Fetch speech payload"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      Simulate.change(textArea, { target: { value: "Hello from the bridge." } });
+      Simulate.change(postureInput, { target: { value: "social_continuity" } });
+      Simulate.change(operatorInput, { target: { value: "Uther Pendragon" } });
+      Simulate.change(privateMode, { target: { checked: true } });
+      Simulate.change(includeRender, { target: { checked: false } });
+      await flush();
+    });
+
+    await act(async () => {
+      button.click();
+      await flush();
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/debug/deiphobe_speech_payload",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "Hello from the bridge.",
+          posture: "social_continuity",
+          operator_name: "Uther Pendragon",
+          private_mode: true,
+          include_render_request: false,
+        }),
+      }),
+    );
+    expect(container.textContent).toContain("Hello from the bridge.");
+    expect(container.textContent).toContain("warm");
+    expect(container.textContent).toContain("quiet_private");
+    expect(container.textContent).toContain("--text 'Hello from the bridge.'");
+    expect(container.textContent).toContain("--posture 'social_continuity'");
+    expect(container.textContent).toContain("--render");
+  });
+
+  test("shows disabled message for 403 and preserves the last payload", async () => {
+    await renderDeveloperPage();
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      text: async () => "Forbidden",
+    });
+
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find((element) =>
+      element.textContent?.includes("Fetch speech payload"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("Speech debug bridge is disabled");
+    expect(container.textContent).toContain("I held the line.");
+    expect(container.textContent).toContain("Render command preview");
+  });
+
+  test("failed fetch shows an error and preserves previous payload", async () => {
+    await renderDeveloperPage();
+
+    (global.fetch as jest.Mock).mockRejectedValueOnce(new Error("network down"));
+
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find((element) =>
+      element.textContent?.includes("Fetch speech payload"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("network down");
+    expect(container.textContent).toContain("I held the line.");
+    expect(container.textContent).toContain("Render command preview");
+  });
+
+  test("no render request on initial render", async () => {
+    await renderDeveloperPage();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    const renderButton = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Render audio"),
+    );
+    expect(renderButton).toBeTruthy();
+    expect(container.querySelector("audio")).toBeNull();
+    expect(container.textContent).not.toContain("Render Result");
+  });
+
+  test("Render audio button sends expected POST body", async () => {
+    const renderResponse = {
+      rendered: true,
+      status: "rendered",
+      content_type: "audio/wav",
+      bytes_received: 63532,
+      output_path: "/tmp/deiphobe-speech-test/deiphobe-debug-render.wav",
+      error: null,
+      audio_url: null,
+    };
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => renderResponse,
+    });
+
+    await renderDeveloperPage();
+
+    const textArea = container.querySelector("textarea[name='text']") as HTMLTextAreaElement;
+    const postureInput = container.querySelector("input[name='posture']") as HTMLInputElement;
+    const operatorInput = container.querySelector("input[name='operator_name']") as HTMLInputElement;
+
+    await act(async () => {
+      Simulate.change(textArea, { target: { value: "I held the line." } });
+      Simulate.change(postureInput, { target: { value: "conversation_recency" } });
+      Simulate.change(operatorInput, { target: { value: "Uther" } });
+      await flush();
+    });
+
+    const renderButton = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Render audio"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      renderButton.click();
+      await flush();
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/deiphobeSpeech/debug/deiphobe_speech_render/",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "I held the line.",
+          posture: "conversation_recency",
+          operator_name: "Uther",
+          private_mode: false,
+          include_render_request: true,
+          output_filename: "deiphobe-debug-render.wav",
+        }),
+      }),
+    );
+  });
+
+  test("successful render displays render result fields", async () => {
+    const renderResponse = {
+      rendered: true,
+      status: "rendered",
+      content_type: "audio/wav",
+      bytes_received: 63532,
+      output_path: "/tmp/deiphobe-speech-test/deiphobe-debug-render.wav",
+      error: null,
+      audio_url: null,
+    };
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => renderResponse,
+    });
+
+    await renderDeveloperPage();
+
+    const renderButton = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Render audio"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      renderButton.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("Render Result");
+    expect(container.textContent).toContain("rendered");
+    expect(container.textContent).toContain("true");
+    expect(container.textContent).toContain("rendered");
+    expect(container.textContent).toContain("audio/wav");
+    expect(container.textContent).toContain("63532");
+    expect(container.textContent).toContain("/tmp/deiphobe-speech-test/deiphobe-debug-render.wav");
+    expect(container.querySelector("audio")).toBeNull();
+  });
+
+  test("render 403 shows controlled error message", async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      text: async () => "Forbidden",
+    });
+
+    await renderDeveloperPage();
+
+    const renderButton = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Render audio"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      renderButton.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("Speech render bridge is disabled");
+    expect(container.textContent).toContain("I held the line.");
+    expect(container.querySelector("audio")).toBeNull();
+    expect(container.textContent).not.toContain("Render Result");
+  });
+
+  test("failed render preserves existing metadata payload", async () => {
+    (global.fetch as jest.Mock).mockRejectedValueOnce(new Error("render network error"));
+
+    await renderDeveloperPage();
+
+    const renderButton = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Render audio"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      renderButton.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("render network error");
+    expect(container.textContent).toContain("I held the line.");
+    expect(container.textContent).toContain("Render command preview");
+    expect(container.querySelector("audio")).toBeNull();
+  });
+
+  test("no autoplay attribute on audio element when audio_url is present", async () => {
+    const renderResponse = {
+      rendered: true,
+      status: "rendered",
+      content_type: "audio/wav",
+      bytes_received: 100,
+      output_path: "/tmp/deiphobe-speech-test/deiphobe-debug-render.wav",
+      error: null,
+      audio_url: "http://127.0.0.1:8769/audio/deiphobe-debug-render.wav",
+    };
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => renderResponse,
+    });
+
+    await renderDeveloperPage();
+
+    const renderButton = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Render audio"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      renderButton.click();
+      await flush();
+    });
+
+    const audioEl = container.querySelector("audio");
+    expect(audioEl).not.toBeNull();
+    expect(audioEl?.hasAttribute("autoplay")).toBe(false);
+  });
+
+  test("no audio element before successful render", async () => {
+    await renderDeveloperPage();
+    expect(container.querySelector("audio")).toBeNull();
+  });
+
+  test("preview includes private mode when the fetched payload is private", async () => {
+    const livePayload = {
+      ...mockSpeechPayload,
+      avatar_cues: {
+        ...mockSpeechPayload.avatar_cues,
+        private_mode: true,
+        quiet_private: true,
+      },
+    };
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => livePayload,
+    });
+
+    await renderDeveloperPage();
+
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find((element) =>
+      element.textContent?.includes("Fetch speech payload"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("--private-mode");
+    expect(container.textContent).toContain("quiet_private");
+    expect(container.querySelector("audio")).toBeNull();
+  });
+});
+
+describe("SpeechDebugPanel avatar cue dispatch", () => {
+  const originalActEnvironment = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+
+  beforeEach(() => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => { root.unmount(); });
+    container.remove();
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = originalActEnvironment;
+  });
+
+  async function renderPanel(onDispatchCue?: (voiceMode: string) => Promise<void>) {
+    await act(async () => {
+      root.render(
+        <SpeechDebugPanel
+          onDispatchCue={onDispatchCue}
+          onResolveAnimationPath={jest.fn<(v: string) => Promise<string>>().mockResolvedValue("/animations/Relax.vrma")}
+        />,
+      );
+    });
+  }
+
+  test("no cue dispatch on page load", async () => {
+    const mockDispatch = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    await renderPanel(mockDispatch);
+    expect(mockDispatch).not.toHaveBeenCalled();
+  });
+
+  test("Dispatch avatar cue button is present in panel", async () => {
+    const mockDispatch = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    await renderPanel(mockDispatch);
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Dispatch avatar cue"),
+    );
+    expect(button).toBeTruthy();
+  });
+
+  test("Dispatch avatar cue button is disabled when no onDispatchCue is provided", async () => {
+    await renderPanel(undefined);
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Dispatch avatar cue"),
+    ) as HTMLButtonElement | undefined;
+    expect(button).toBeTruthy();
+    expect(button?.disabled).toBe(true);
+  });
+
+  test("Dispatch avatar cue button calls onDispatchCue with current voice_mode", async () => {
+    const mockDispatch = jest.fn<(voiceMode: string) => Promise<void>>().mockResolvedValue(undefined);
+    await renderPanel(mockDispatch);
+
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Dispatch avatar cue"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+      await flush();
+    });
+
+    expect(mockDispatch).toHaveBeenCalledTimes(1);
+    expect(mockDispatch).toHaveBeenCalledWith(mockSpeechPayload.avatar_cues.voice_mode);
+  });
+
+  test("successful dispatch shows confirmation status", async () => {
+    const mockDispatch = jest.fn<(voiceMode: string) => Promise<void>>().mockResolvedValue(undefined);
+    await renderPanel(mockDispatch);
+
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Dispatch avatar cue"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain(`Dispatched ${mockSpeechPayload.avatar_cues.voice_mode}`);
+  });
+
+  test("failed dispatch shows error status", async () => {
+    const mockDispatch = jest.fn<(voiceMode: string) => Promise<void>>().mockRejectedValue(
+      new Error("model not ready"),
+    );
+    await renderPanel(mockDispatch);
+
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Dispatch avatar cue"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("model not ready");
+  });
+
+  test("dispatch section shows current voice_mode and quiet_private from payload", async () => {
+    await renderPanel(undefined);
+    expect(container.textContent).toContain("Avatar Cue Dispatch");
+    expect(container.textContent).toContain(mockSpeechPayload.avatar_cues.voice_mode);
+  });
+});
+
+describe("SpeechDebugPanel tuning UX improvements", () => {
+  const originalActEnvironment = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+
+  beforeEach(() => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    global.fetch = jest.fn() as any;
+  });
+
+  afterEach(() => {
+    act(() => { root.unmount(); });
+    container.remove();
+    global.fetch = (undefined as any);
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = originalActEnvironment;
+  });
+
+  function mockResolver(path = "/animations/Relax.vrma") {
+    return jest.fn<(voiceMode: string) => Promise<string>>().mockResolvedValue(path);
+  }
+
+  async function renderPanel(
+    onDispatchCue?: (voiceMode: string) => Promise<void>,
+    onResolveAnimationPath: (voiceMode: string) => Promise<string> = mockResolver(),
+  ) {
+    await act(async () => {
+      root.render(
+        <SpeechDebugPanel
+          onDispatchCue={onDispatchCue}
+          onResolveAnimationPath={onResolveAnimationPath}
+        />,
+      );
+    });
+  }
+
+  test("Cue Preview section is present on load", async () => {
+    await renderPanel();
+    expect(container.textContent).toContain("Cue Preview");
+    expect(container.textContent).toContain("animation path");
+    expect(container.textContent).toContain("pace");
+    expect(container.textContent).toContain("pitch_shape");
+  });
+
+  test("Cue Preview shows resolved animation path after dispatch", async () => {
+    const resolver = mockResolver("/animations/Blush.vrma");
+    const mockDispatch = jest.fn<(voiceMode: string) => Promise<void>>().mockResolvedValue(undefined);
+    await renderPanel(mockDispatch, resolver);
+
+    // Path is not resolved yet — no dispatch has happened.
+    expect(container.textContent).toContain("dispatch to resolve");
+
+    const dispatchButton = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Dispatch avatar cue"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      dispatchButton.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("/animations/Blush.vrma");
+  });
+
+  test("Cue Preview shows payload voice_mode when no override is set", async () => {
+    await renderPanel();
+    expect(container.textContent).toContain(mockSpeechPayload.avatar_cues.voice_mode);
+  });
+
+  test("voice_posture override dropdown is present", async () => {
+    await renderPanel();
+    const select = container.querySelector("select[name='voice_posture_override']");
+    expect(select).not.toBeNull();
+  });
+
+  test("override dropdown changes effective cue target when set", async () => {
+    const mockDispatch = jest.fn<(voiceMode: string) => Promise<void>>().mockResolvedValue(undefined);
+    await renderPanel(mockDispatch, mockResolver());
+
+    const select = container.querySelector("select[name='voice_posture_override']") as HTMLSelectElement;
+    await act(async () => {
+      Simulate.change(select, { target: { value: "governed_system_fact" } });
+      await flush();
+    });
+
+    const dispatchButton = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Dispatch avatar cue"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      dispatchButton.click();
+      await flush();
+    });
+
+    expect(mockDispatch).toHaveBeenCalledWith("governed_system_fact");
+  });
+
+  test("override fallback: empty override uses payload voice_mode for cue", async () => {
+    const mockDispatch = jest.fn<(voiceMode: string) => Promise<void>>().mockResolvedValue(undefined);
+    await renderPanel(mockDispatch, mockResolver());
+
+    const dispatchButton = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Dispatch avatar cue"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      dispatchButton.click();
+      await flush();
+    });
+
+    expect(mockDispatch).toHaveBeenCalledWith(mockSpeechPayload.avatar_cues.voice_mode);
+  });
+
+  test("Render + Cue button is present", async () => {
+    const mockDispatch = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    await renderPanel(mockDispatch);
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Render + Cue"),
+    );
+    expect(button).toBeTruthy();
+  });
+
+  test("Render + Cue button is disabled when no cue handler is provided", async () => {
+    await renderPanel(undefined);
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Render + Cue"),
+    ) as HTMLButtonElement | undefined;
+    expect(button).toBeTruthy();
+    expect(button?.disabled).toBe(true);
+  });
+
+  test("Render + Cue requires manual click — no fetch on load", async () => {
+    const mockDispatch = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    await renderPanel(mockDispatch);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockDispatch).not.toHaveBeenCalled();
+  });
+
+  test("Render + Cue calls render then dispatch on click", async () => {
+    const renderResponse = {
+      rendered: true,
+      status: "rendered",
+      content_type: "audio/wav",
+      bytes_received: 100,
+      output_path: "/tmp/deiphobe-speech-test/deiphobe-debug-render.wav",
+      error: null,
+      audio_url: null,
+    };
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => renderResponse,
+    });
+
+    const mockDispatch = jest.fn<(voiceMode: string) => Promise<void>>().mockResolvedValue(undefined);
+    await renderPanel(mockDispatch, mockResolver());
+
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Render + Cue"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+      await flush();
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(mockDispatch).toHaveBeenCalledTimes(1);
+    expect(mockDispatch).toHaveBeenCalledWith(mockSpeechPayload.avatar_cues.voice_mode);
+  });
+
+  test("Render + Cue does not introduce autoplay", async () => {
+    const renderResponse = {
+      rendered: true,
+      status: "rendered",
+      content_type: "audio/wav",
+      bytes_received: 100,
+      output_path: "/tmp/deiphobe-speech-test/deiphobe-debug-render.wav",
+      error: null,
+      audio_url: "http://127.0.0.1:8769/audio/deiphobe-debug-render.wav",
+    };
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => renderResponse,
+    });
+
+    const mockDispatch = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    await renderPanel(mockDispatch, mockResolver());
+
+    const button = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Render + Cue"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      button.click();
+      await flush();
+    });
+
+    const audioEl = container.querySelector("audio");
+    expect(audioEl).not.toBeNull();
+    expect(audioEl?.hasAttribute("autoplay")).toBe(false);
+  });
+
+  test("model-not-ready error from cue handler shows safe status message", async () => {
+    const mockDispatch = jest.fn<(voiceMode: string) => Promise<void>>().mockRejectedValue(
+      new Error("avatar model not ready"),
+    );
+    await renderPanel(mockDispatch, mockResolver());
+
+    const dispatchButton = Array.from(container.querySelectorAll("button[type='button']")).find(
+      (el) => el.textContent?.includes("Dispatch avatar cue"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      dispatchButton.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("avatar model not ready");
+    expect(container.querySelector("audio")).toBeNull();
+  });
+});
