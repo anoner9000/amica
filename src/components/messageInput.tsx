@@ -2,8 +2,8 @@ import * as ort from "onnxruntime-web";
 ort.env.wasm.wasmPaths = "/_next/static/chunks/";
 
 import { useContext, useEffect, useRef, useState } from "react";
-import { useMicVAD } from "@ricky0123/vad-react";
 import { IconButton } from "./iconButton";
+import { MicrophoneCapture } from "@/features/microphone/microphoneCapture";
 import { useTranscriber } from "@/hooks/useTranscriber";
 import {
   cleanTranscript,
@@ -48,24 +48,41 @@ export default function MessageInput({
   const { audioControls: moshi } = useContext(AudioControlsContext);
   const [moshiMuted, setMoshiMuted] = useState(moshi.isMuted());
 
-  const vad = useMicVAD({
-    startOnLoad: false,
-    workletURL: VAD_WORKLET_URL,
-    modelURL: VAD_MODEL_URL,
-    onSpeechStart: () => {
-      console.debug("vad", "on_speech_start");
-      console.time("performance_speech");
-    },
-    onSpeechEnd: (audio: Float32Array) => {
-      console.debug("vad", "on_speech_end");
-      console.timeEnd("performance_speech");
-      console.time("performance_transcribe");
-      (window as any).chatvrm_latency_tracker = {
-        start: +Date.now(),
-        active: true,
-      };
+  // Microphone capture is created lazily and only ever started from the
+  // button click. Failures are classified, surfaced through the alert
+  // system, and never permanently disable the button — the user can fix
+  // the browser permission and simply click again.
+  const captureRef = useRef<MicrophoneCapture | null>(null);
+  if (captureRef.current === null) {
+    captureRef.current = new MicrophoneCapture();
+  }
+  const [micListening, setMicListening] = useState(false);
+  const [micStarting, setMicStarting] = useState(false);
+  const [micSpeaking, setMicSpeaking] = useState(false);
 
-      try {
+  useEffect(() => {
+    return () => {
+      captureRef.current?.stop();
+    };
+  }, []);
+
+  function onSpeechStart() {
+    console.debug("vad", "on_speech_start");
+    console.time("performance_speech");
+    setMicSpeaking(true);
+  }
+
+  function onSpeechEnd(audio: Float32Array) {
+    console.debug("vad", "on_speech_end");
+    console.timeEnd("performance_speech");
+    console.time("performance_transcribe");
+    setMicSpeaking(false);
+    (window as any).chatvrm_latency_tracker = {
+      start: +Date.now(),
+      active: true,
+    };
+
+    try {
         switch (config("stt_backend")) {
           case "whisper_browser": {
             console.debug("whisper_browser attempt");
@@ -127,11 +144,43 @@ export default function MessageInput({
         console.error("stt_backend error", e);
         alert.error("STT backend error", e.toString());
       }
-    },
-  });
+  }
 
-  if (vad.errored) {
-    console.error("vad error", vad.errored);
+  async function toggleMicrophone() {
+    const capture = captureRef.current!;
+    if (capture.isActive) {
+      capture.stop();
+      setMicListening(false);
+      setMicSpeaking(false);
+      return;
+    }
+    if (micStarting) {
+      return;
+    }
+    setMicStarting(true);
+    try {
+      const failure = await capture.start({
+        workletURL: VAD_WORKLET_URL,
+        modelURL: VAD_MODEL_URL,
+        onSpeechStart,
+        onSpeechEnd,
+        onVADMisfire: () => setMicSpeaking(false),
+        onFailure: (sessionFailure) => {
+          // A device that disappears mid-session ends the session; the
+          // button returns to idle and stays clickable.
+          setMicListening(false);
+          setMicSpeaking(false);
+          alert.error("Microphone", sessionFailure.guidance);
+        },
+      });
+      if (failure === null && capture.isActive) {
+        setMicListening(true);
+      } else if (failure) {
+        alert.error("Microphone", failure.guidance);
+      }
+    } finally {
+      setMicStarting(false);
+    }
   }
 
   function handleTranscriptionResult(preprocessed: string) {
@@ -231,7 +280,7 @@ export default function MessageInput({
 
     bot.receiveMessageFromUser(message, false);
     // only if we are using non-VAD mode should we focus on the input
-    if (!vad.listening) {
+    if (!micListening) {
       if (!hasOnScreenKeyboard()) {
         inputRef.current?.focus();
       }
@@ -258,15 +307,12 @@ export default function MessageInput({
                 />
               ) : (
                 <IconButton
-                  iconName={vad.listening ? "24/PauseAlt" : "24/Microphone"}
+                  iconName={micListening ? "24/PauseAlt" : "24/Microphone"}
+                  label="Microphone"
                   className="bg-secondary hover:bg-secondary-hover active:bg-secondary-press disabled:bg-secondary-disabled"
-                  isProcessing={vad.userSpeaking}
-                  disabled={
-                    config("stt_backend") === "none" ||
-                    vad.loading ||
-                    Boolean(vad.errored)
-                  }
-                  onClick={vad.toggle}
+                  isProcessing={micSpeaking || micStarting}
+                  disabled={config("stt_backend") === "none"}
+                  onClick={toggleMicrophone}
                 />
               )}
             </div>
