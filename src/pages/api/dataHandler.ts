@@ -1,6 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { writeFile } from '@/features/externalAPI/utils/apiHelper';
-import { chatLogsFilePath, handleGetChatLogs, handleGetConfig, handleGetLogs, handleGetSubconscious, handleGetUserInputMessages, handlePostChatLogs, handlePostConfig, handlePostLogs, handlePostSubconscious, handlePostUserInputMessages, logsFilePath, subconsciousFilePath, userInputMessagesFilePath } from '@/features/externalAPI/dataHelper';
+import { AtomicPersistenceError, writeFile } from '@/features/externalAPI/utils/apiHelper';
+import { chatLogsFilePath, configRevision, ConfigConflictError, ConfigValidationError, handleGetChatLogs, handleGetConfig, handleGetLogs, handleGetSubconscious, handleGetUserInputMessages, handlePostChatLogs, handlePostConfig, handlePostLogs, handlePostSubconscious, handlePostUserInputMessages, logsFilePath, subconsciousFilePath, userInputMessagesFilePath } from '@/features/externalAPI/dataHelper';
+
+export const CONFIG_REVISION_HEADER = 'x-config-revision';
 
 // Clear data on startup
 writeFile(subconsciousFilePath, []);
@@ -26,7 +28,17 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         return res.status(405).end(`Method ${req.method} Not Allowed`);
     }
   } catch (error) {
-    return res.status(500).json({ error: error });
+    if (error instanceof AtomicPersistenceError) {
+      return res.status(500).json({
+        error: error.message,
+        code: error.targetReplaced
+          ? 'CONFIG_DURABILITY_UNCONFIRMED'
+          : 'CONFIG_PERSISTENCE_FAILED',
+        phase: error.phase,
+        targetReplaced: error.targetReplaced,
+      });
+    }
+    return res.status(500).json({ error: 'Internal server error.' });
   }
 }
 
@@ -35,6 +47,7 @@ const handleGetRequest = (type: string, res: NextApiResponse) => {
     switch (type) {
       case 'config':
         data = handleGetConfig();
+        res.setHeader(CONFIG_REVISION_HEADER, configRevision());
         break;
       case 'subconscious':
         data = handleGetSubconscious();
@@ -57,11 +70,30 @@ const handleGetRequest = (type: string, res: NextApiResponse) => {
   const handlePostRequest = (type: string, req: NextApiRequest, res: NextApiResponse) => {
     const { body } = req;
     let response;
-  
+
     switch (type) {
-      case 'config':
-        response = handlePostConfig(body);
+      case 'config': {
+        const clientRevision = req.headers[CONFIG_REVISION_HEADER];
+        try {
+          response = handlePostConfig(
+            body,
+            typeof clientRevision === 'string' ? clientRevision : undefined,
+          );
+        } catch (error) {
+          if (error instanceof ConfigConflictError) {
+            res.setHeader(CONFIG_REVISION_HEADER, error.currentRevision);
+            return res
+              .status(409)
+              .json({ error: error.message, revision: error.currentRevision });
+          }
+          if (error instanceof ConfigValidationError) {
+            return res.status(400).json({ error: error.message });
+          }
+          throw error;
+        }
+        res.setHeader(CONFIG_REVISION_HEADER, (response as any).revision);
         break;
+      }
       case 'subconscious':
         response = handlePostSubconscious(body);
         break;

@@ -2,7 +2,7 @@ import { useContext, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { updateConfig, defaultConfig } from '@/utils/config';
+import { updateConfigs, defaultConfig } from '@/utils/config';
 import { isTauri } from '@/utils/isTauri';
 import VrmDemo from "@/components/vrmDemo";
 import { supabase } from '@/utils/supabase';
@@ -79,55 +79,21 @@ export default function Import() {
   }, [router]);
 
 
-  function overrideConfig() {
-    if (name) {
-      updateConfig('name', name as string);
-    } else {
-      updateConfig('name', defaultConfig('name'));
-    }
-
-    if (systemPrompt) {
-      updateConfig('system_prompt', systemPrompt as string);
-    } else {
-      updateConfig('system_prompt', defaultConfig('system_prompt'));
-    }
-
-    if (visionSystemPrompt) {
-      updateConfig('vision_system_prompt', visionSystemPrompt as string);
-    } else {
-      updateConfig('vision_system_prompt', defaultConfig('vision_system_prompt'));
-    }
-
-    if (bgUrl) {
-      updateConfig('bg_url', bgUrl as string);
-    } else {
-      updateConfig('bg_url', defaultConfig('bg_url'));
-    }
-
-    if (youtubeVideoId) {
-      updateConfig('youtube_videoid', youtubeVideoId as string);
-    } else {
-      updateConfig('youtube_videoid', defaultConfig('youtube_videoid'));
-    }
-
+  async function overrideConfig() {
+    const mutations = [
+      { key: 'name', value: name || defaultConfig('name') },
+      { key: 'system_prompt', value: systemPrompt || defaultConfig('system_prompt') },
+      { key: 'vision_system_prompt', value: visionSystemPrompt || defaultConfig('vision_system_prompt') },
+      { key: 'bg_url', value: bgUrl || defaultConfig('bg_url') },
+      { key: 'youtube_videoid', value: youtubeVideoId || defaultConfig('youtube_videoid') },
+      { key: 'vrm_url', value: vrmUrl || defaultConfig('vrm_url') },
+      ...(vrmUrl ? [{ key: 'vrm_save_type', value: 'web' }] : []),
+      { key: 'animation_url', value: animationUrl || defaultConfig('animation_url') },
+      { key: 'voice_url', value: voiceUrl || defaultConfig('voice_url') },
+    ];
+    await updateConfigs(mutations);
     if (vrmUrl) {
-      updateConfig('vrm_url', vrmUrl as string);
-      updateConfig('vrm_save_type', 'web');
-      vrmDataProvider.addItem(vrmUrl, 'web', "", vrmUrl, thumbData);
-    } else {
-      updateConfig('vrm_url', defaultConfig('vrm_url'));
-    }
-
-    if (animationUrl) {
-      updateConfig('animation_url', animationUrl as string);
-    } else {
-      updateConfig('animation_url', defaultConfig('animation_url'));
-    }
-
-    if (voiceUrl) {
-      updateConfig('voice_url', voiceUrl as string);
-    } else {
-      updateConfig('voice_url', defaultConfig('voice_url'));
+      await vrmDataProvider.addItem(vrmUrl, 'web', "", vrmUrl, thumbData);
     }
   }
 
@@ -178,10 +144,14 @@ export default function Import() {
                 <div className="sm:col-span-3 max-w-md rounded-xl mt-2">
                   <button
                     onClick={async () => {
-                      await 
-                      overrideConfig();
-                      window.location.href = '/';
                       setButtonDisabled(true);
+                      try {
+                        await overrideConfig();
+                        window.location.href = '/';
+                      } catch {
+                        setError(true);
+                        setButtonDisabled(false);
+                      }
                     }}
                     className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-fuchsia-500 hover:bg-fuchsia-600 focus:outline-none ml-2"
                     disabled={buttonDisabled}

@@ -4,7 +4,7 @@ import { useRouter } from 'next/router';
 import { useContext, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { config, updateConfig } from '@/utils/config';
+import { config, updateConfigs } from '@/utils/config';
 import { isTauri } from '@/utils/isTauri';
 import { FilePond, registerPlugin } from 'react-filepond';
 import { ViewerContext } from "@/features/vrmViewer/viewerContext";
@@ -118,10 +118,18 @@ export default function Share() {
 
   useEffect(() => {
     if (vrmLoadedFromIndexedDb) {
-      vrmDataProvider.addItemUrl(vrmHash, vrmUrl);
-      updateConfig('vrm_url', vrmUrl);
-      updateConfig('vrm_save_type', 'web');
-      setVrmSaveType('web');
+      void (async () => {
+        try {
+          await updateConfigs([
+            { key: 'vrm_url', value: vrmUrl },
+            { key: 'vrm_save_type', value: 'web' },
+          ]);
+          vrmDataProvider.addItemUrl(vrmHash, vrmUrl);
+          setVrmSaveType('web');
+        } catch {
+          // updateConfig already reports the actionable save failure.
+        }
+      })();
     }
   }, [vrmLoadedFromIndexedDb]);
 

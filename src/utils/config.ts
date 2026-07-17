@@ -1,4 +1,10 @@
-import { handleConfig, serverConfig } from "@/features/externalAPI/externalAPI";
+import {
+  ConfigConflictError,
+  handleConfig,
+  serverConfig,
+  serverConfigRevision,
+} from "@/features/externalAPI/externalAPI";
+import { alert } from "@/features/alert/alertContext";
 import { normalizeChatbotBackend } from "@/features/chat/chatbotBackend";
 import { resolveHostAwareLocalUrl } from "@/utils/hostAwareUrl";
 
@@ -149,16 +155,15 @@ export function prefixed(key: string) {
   return `chatvrm_${key}`;
 }
 
-// Ensure syncLocalStorage runs only on the server side and once
-if (typeof window !== "undefined") {
-  (async () => {
-    await handleConfig("init");
-  })();
-} else {
-  (async () => {
-    await handleConfig("fetch");
-  })();
-}
+// Both the browser and the server hydrate read-only: the server config file
+// is authoritative and page load / hydration must never write it. Only a
+// deliberate user mutation (updateConfig) may emit a server write.
+// Deferred one microtask so the circular config ⇄ externalAPI module pair
+// finishes initializing first (a synchronous call here hits the half-built
+// externalAPI module and crashes on configUrl's TDZ).
+void Promise.resolve()
+  .then(() => handleConfig("fetch"))
+  .catch((error) => console.error("Failed to load server config:", error));
 
 export function config(key: string): string {
   if (key === "chatbot_backend") {
@@ -234,20 +239,117 @@ export function config(key: string): string {
   throw new Error(`config key not found: ${key}`);
 }
 
-export async function updateConfig(key: string, value: string) {
+type ConfigMutation = {
+  key: string;
+  value: string;
+  resolve: () => void;
+  reject: (error: unknown) => void;
+};
+
+export class ConfigQueueInvalidatedError extends Error {
+  readonly failedKey: string;
+  readonly conflict: boolean;
+
+  constructor(failedKey: string, conflict: boolean) {
+    super(
+      conflict
+        ? `Configuration save for "${failedKey}" conflicted; this later queued save was cancelled for deliberate reconciliation.`
+        : `Configuration save for "${failedKey}" failed; this later queued save was cancelled to preserve ordering.`,
+    );
+    this.name = "ConfigQueueInvalidatedError";
+    this.failedKey = failedKey;
+    this.conflict = conflict;
+  }
+}
+
+const configMutationQueue: ConfigMutation[] = [];
+let processingConfigMutation = false;
+
+function reportConfigUpdateError(error: unknown, key: string) {
+  if (error instanceof ConfigQueueInvalidatedError) {
+    return;
+  }
+  const conflict = error instanceof ConfigConflictError;
+  const title = conflict ? "Configuration conflict" : "Configuration save failed";
+  const message = conflict
+    ? `"${key}" was not saved because the server configuration changed. Reload and reconcile before trying again.`
+    : `"${key}" was not saved. Check the server connection and try again.`;
+  console.error(`${title} for key "${key}".`);
+  alert.error(title, message);
+}
+
+async function drainConfigMutationQueue() {
+  if (processingConfigMutation) {
+    return;
+  }
+  processingConfigMutation = true;
   try {
-    const localKey = prefixed(key);
-
-    // Update localStorage if available
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(localKey, value);
+    while (configMutationQueue.length > 0) {
+      const mutation = configMutationQueue.shift()!;
+      try {
+        await handleConfig("update", { key: mutation.key, value: mutation.value });
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem(prefixed(mutation.key), mutation.value);
+        }
+        mutation.resolve();
+      } catch (error) {
+        mutation.reject(error);
+        const invalidated = new ConfigQueueInvalidatedError(
+          mutation.key,
+          error instanceof ConfigConflictError,
+        );
+        for (const queued of configMutationQueue.splice(0)) {
+          queued.reject(invalidated);
+        }
+      }
     }
+  } finally {
+    processingConfigMutation = false;
+    // A mutation can be enqueued after the loop observes an empty queue but
+    // before the finally block releases the processor.
+    if (configMutationQueue.length > 0) {
+      void drainConfigMutationQueue();
+    }
+  }
+}
 
-    // Sync update to server config
-    await handleConfig("update",{ key, value });
+// Every authoritative mutation enters one FIFO queue. The returned promise is
+// also observed here so intentionally fire-and-forget UI handlers surface one
+// actionable alert without producing an unhandled rejection. Awaiting callers
+// still receive the original rejection.
+export function updateConfig(key: string, value: string): Promise<void> {
+  const promise = new Promise<void>((resolve, reject) => {
+    configMutationQueue.push({ key, value, resolve, reject });
+    void drainConfigMutationQueue();
+  });
+  void promise.catch((error) => reportConfigUpdateError(error, key));
+  return promise;
+}
 
+export function updateConfigs(
+  mutations: ReadonlyArray<{ key: string; value: string }>,
+): Promise<void[]> {
+  return Promise.all(mutations.map(({ key, value }) => updateConfig(key, value)));
+}
+
+export function authoritativeConfigSnapshot(): Readonly<Record<string, string>> {
+  return { ...serverConfig };
+}
+
+export function authoritativeConfigRevision(): string | null {
+  return serverConfigRevision;
+}
+
+// Browser-local settings (device selections, migrations of stale local
+// values, transient UI state) update localStorage only and never reach the
+// authoritative server configuration.
+export function updateLocalConfig(key: string, value: string) {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(prefixed(key), value);
+    }
   } catch (e) {
-    console.error(`Error updating config for key "${key}": ${e}`);
+    console.error(`Error updating local config for key "${key}": ${e}`);
   }
 }
 
