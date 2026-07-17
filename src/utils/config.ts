@@ -149,16 +149,15 @@ export function prefixed(key: string) {
   return `chatvrm_${key}`;
 }
 
-// Ensure syncLocalStorage runs only on the server side and once
-if (typeof window !== "undefined") {
-  (async () => {
-    await handleConfig("init");
-  })();
-} else {
-  (async () => {
-    await handleConfig("fetch");
-  })();
-}
+// Both the browser and the server hydrate read-only: the server config file
+// is authoritative and page load / hydration must never write it. Only a
+// deliberate user mutation (updateConfig) may emit a server write.
+// Deferred one microtask so the circular config ⇄ externalAPI module pair
+// finishes initializing first (a synchronous call here hits the half-built
+// externalAPI module and crashes on configUrl's TDZ).
+void Promise.resolve()
+  .then(() => handleConfig("fetch"))
+  .catch((error) => console.error("Failed to load server config:", error));
 
 export function config(key: string): string {
   if (key === "chatbot_backend") {
@@ -248,6 +247,19 @@ export async function updateConfig(key: string, value: string) {
 
   } catch (e) {
     console.error(`Error updating config for key "${key}": ${e}`);
+  }
+}
+
+// Browser-local settings (device selections, migrations of stale local
+// values, transient UI state) update localStorage only and never reach the
+// authoritative server configuration.
+export function updateLocalConfig(key: string, value: string) {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(prefixed(key), value);
+    }
+  } catch (e) {
+    console.error(`Error updating local config for key "${key}": ${e}`);
   }
 }
 

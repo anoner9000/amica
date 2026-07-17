@@ -1,4 +1,4 @@
-import { config, defaults, prefixed } from "@/utils/config";
+import { config } from "@/utils/config";
 import {
   MAX_STORAGE_TOKENS,
   TimestampedPrompt,
@@ -33,6 +33,20 @@ chatLogsUrl.searchParams.append("type", "chatLogs");
 // Cached server config
 export let serverConfig: Record<string, string> = {};
 
+// Optimistic-concurrency token for the server config file. The server issues
+// it on every config GET/POST; a config write is only accepted when it carries
+// the revision the client last read. Never invented client-side.
+export let serverConfigRevision: string | null = null;
+
+export const CONFIG_REVISION_HEADER = "x-config-revision";
+
+function captureRevision(response: any) {
+  const revision = response?.headers?.get?.(CONFIG_REVISION_HEADER);
+  if (revision) {
+    serverConfigRevision = revision;
+  }
+}
+
 export async function fetcher(method: string, url: URL, data?: any) {
   let response: any;
   switch (method) {
@@ -40,9 +54,23 @@ export async function fetcher(method: string, url: URL, data?: any) {
       try {
         response = await fetch(url, {
           method: method,
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(serverConfigRevision
+              ? { [CONFIG_REVISION_HEADER]: serverConfigRevision }
+              : {}),
+          },
           body: JSON.stringify(data),
         });
+        if (response.ok || response.status === 409) {
+          // On success the server issues the new revision; on conflict it
+          // reports the current one so the next deliberate save can proceed.
+          // A conflicted write is never retried with the client's data.
+          captureRevision(response);
+        }
+        if (response.status === 409) {
+          console.warn("Server config changed elsewhere; save rejected.");
+        }
       } catch (error) {
         console.error("Failed to POST server config: ", error);
       }
@@ -53,6 +81,7 @@ export async function fetcher(method: string, url: URL, data?: any) {
         response = await fetch(url);
         if (response.ok) {
           serverConfig = await response.json();
+          captureRevision(response);
         }
       } catch (error) {
         console.error("Failed to fetch server config:", error);
@@ -62,6 +91,7 @@ export async function fetcher(method: string, url: URL, data?: any) {
     default:
       break;
   }
+  return response;
 }
 
 export async function handleConfig(
@@ -73,39 +103,23 @@ export async function handleConfig(
   }
 
   switch (type) {
-    // Call this function at the beginning of your application to load the server config and sync to localStorage if needed.
-    case "init":
-      let localStorageData: Record<string, string> = {};
-
-      for (const key in defaults) {
-        const localKey = prefixed(key);
-        const value = localStorage.getItem(localKey);
-
-        if (value !== null) {
-          localStorageData[key] = value;
-        } else {
-          // Append missing keys with default values
-          localStorageData[key] = (<any>defaults)[key];
-        }
-      }
-
-      // Sync update to server config
-      await fetcher("POST", configUrl, localStorageData);
-
-      break;
     case "fetch":
-      // Sync update to server config cache
-      await fetcher("GET", configUrl);
-
-      break;
+      // Read-only: populate the server config cache. Hydration, remounts,
+      // reloads, and reconnects may only ever take this path. The server
+      // file is authoritative; client defaults are not.
+      return fetcher("GET", configUrl);
 
     case "update":
-      await fetcher("POST", configUrl, data);
-
-      break;
+      // Deliberate single-key mutation from an explicit user action.
+      // A write must carry the revision the client read, so read first if
+      // this client has never fetched the server config.
+      if (serverConfigRevision === null) {
+        await fetcher("GET", configUrl);
+      }
+      return fetcher("POST", configUrl, data);
 
     default:
-      break;
+      return;
   }
 }
 

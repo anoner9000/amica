@@ -52,3 +52,47 @@ export const writeFile = (filePath: string, content: any): void => {
     throw new Error(`Failed to write file: ${error}`);
   }
 };
+
+// Atomic replacement for authoritative files: serialize, write to a temp
+// file on the same filesystem, flush, then rename over the target. The
+// previous version is kept as a single bounded .bak. A partially written
+// file can never become authoritative.
+export const writeFileAtomic = (
+  filePath: string,
+  content: any,
+  options: { defaultMode?: number } = {},
+): void => {
+  const serialized = JSON.stringify(content, null, 2);
+  if (serialized === undefined) {
+    throw new Error("Refusing to write unserializable content");
+  }
+  let mode = options.defaultMode ?? 0o600;
+  let exists = false;
+  try {
+    mode = fs.statSync(filePath).mode & 0o777;
+    exists = true;
+  } catch {
+    // Target does not exist yet; use the default mode.
+  }
+  const tmpPath = `${filePath}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(tmpPath, "w", mode);
+    fs.writeSync(fd, serialized, null, "utf8");
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = null;
+    if (exists) {
+      fs.copyFileSync(filePath, `${filePath}.bak`);
+      fs.chmodSync(`${filePath}.bak`, mode);
+    }
+    fs.renameSync(tmpPath, filePath);
+  } catch (error) {
+    if (fd !== null) {
+      try { fs.closeSync(fd); } catch {}
+    }
+    try { fs.unlinkSync(tmpPath); } catch {}
+    console.error(`Error atomically writing file at ${filePath}:`, error);
+    throw new Error(`Failed to write file: ${error}`);
+  }
+};

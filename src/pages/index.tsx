@@ -53,7 +53,7 @@ import { Message, Role } from "@/features/chat/messages";
 import { ChatContext } from "@/features/chat/chatContext";
 import { AlertContext } from "@/features/alert/alertContext";
 
-import { config, updateConfig } from '@/utils/config';
+import { config, updateConfig, updateLocalConfig } from '@/utils/config';
 import { resolveVoiceVolume, voiceVolumePercent } from "@/utils/voiceVolume";
 import { isTauri } from '@/utils/isTauri';
 import { langs } from '@/i18n/langs';
@@ -324,8 +324,9 @@ export default function Home() {
 
     // TODO remove in future
     // this change was just to make naming cleaner
+    // Local-value migration on mount must never write server config.
     if (config("tts_backend") === 'openai') {
-      updateConfig("tts_backend", "openai_tts");
+      updateLocalConfig("tts_backend", "openai_tts");
     }
   }, [bot, viewer]);
 
