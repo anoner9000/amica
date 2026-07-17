@@ -41,7 +41,11 @@ function makeStream(trackCount = 1) {
 }
 
 function makeVad() {
-  return { start: jest.fn(), pause: jest.fn(), destroy: jest.fn() };
+  return {
+    start: jest.fn<() => void | Promise<void>>(),
+    pause: jest.fn<() => void>(),
+    destroy: jest.fn<() => void>(),
+  };
 }
 
 function installMediaDevices(getUserMedia: any) {
@@ -268,6 +272,73 @@ describe("capture sessions", () => {
       expect(track.stop).toHaveBeenCalled();
     }
     expect(capture.isActive).toBe(false);
+  });
+
+  test("a synchronous VAD start failure is classified and cleans the entire startup transaction", async () => {
+    const stream = makeStream(2);
+    installMediaDevices(jest.fn<() => Promise<any>>().mockResolvedValue(stream));
+    const vad = makeVad();
+    vad.start.mockImplementation(() => {
+      throw makeError("NotSupportedError");
+    });
+    const infoSpy = jest.spyOn(console, "info").mockImplementation(() => {});
+    const capture = new MicrophoneCapture(async () => vad);
+
+    const failure = await capture.start(BASE_OPTS);
+
+    expect(failure).toMatchObject({
+      failureClass: "recording_unsupported",
+      errorName: "NotSupportedError",
+    });
+    expect(vad.pause).toHaveBeenCalledTimes(1);
+    expect(vad.destroy).toHaveBeenCalledTimes(1);
+    stream.tracks.forEach((track: any) => expect(track.stop).toHaveBeenCalledTimes(1));
+    expect(capture.isActive).toBe(false);
+    expect(capture.isStarting).toBe(false);
+    expect(navigator.mediaDevices.addEventListener).not.toHaveBeenCalled();
+    expect(navigator.mediaDevices.removeEventListener).not.toHaveBeenCalled();
+    expect(infoSpy.mock.calls.filter((call) =>
+      call[0] === "[mic-diagnostic]" && (call[1] as any)?.event === "capture_failed"
+    )).toHaveLength(1);
+  });
+
+  test("an asynchronous VAD start rejection cleans every track and a later click can succeed", async () => {
+    const failedStream = makeStream(2);
+    const successfulStream = makeStream();
+    installMediaDevices(
+      jest.fn<() => Promise<any>>()
+        .mockResolvedValueOnce(failedStream)
+        .mockResolvedValueOnce(successfulStream),
+    );
+    const failedVad = makeVad();
+    failedVad.start.mockImplementation(() =>
+      Promise.reject(makeError("AbortError"))
+    );
+    const successfulVad = makeVad();
+    let factoryCalls = 0;
+    const capture = new MicrophoneCapture(async () =>
+      factoryCalls++ === 0 ? failedVad : successfulVad
+    );
+
+    const failure = await capture.start(BASE_OPTS);
+
+    expect(failure).toMatchObject({
+      failureClass: "capture_aborted",
+      errorName: "AbortError",
+    });
+    expect(failedVad.pause).toHaveBeenCalledTimes(1);
+    expect(failedVad.destroy).toHaveBeenCalledTimes(1);
+    failedStream.tracks.forEach((track: any) => expect(track.stop).toHaveBeenCalledTimes(1));
+    expect(capture.isActive).toBe(false);
+    expect(capture.isStarting).toBe(false);
+    expect(navigator.mediaDevices.addEventListener).not.toHaveBeenCalled();
+
+    const retry = await capture.start(BASE_OPTS);
+    expect(retry).toBeNull();
+    expect(capture.isActive).toBe(true);
+    expect(successfulVad.start).toHaveBeenCalledTimes(1);
+    expect(navigator.mediaDevices.addEventListener).toHaveBeenCalledTimes(1);
+    capture.stop();
   });
 
   test("a stream resolved after stop() during startup is released, not leaked", async () => {

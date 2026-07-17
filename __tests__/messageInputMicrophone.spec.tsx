@@ -18,6 +18,10 @@ const mockStop = jest.fn();
 let mockActive = false;
 
 jest.mock("../src/features/microphone/microphoneCapture", () => ({
+  MICROPHONE_GUIDANCE: {
+    unknown_capture_failure:
+      "The microphone could not be started. Check browser permissions and try again.",
+  },
   MicrophoneCapture: class {
     get isActive() {
       return mockActive;
@@ -236,6 +240,50 @@ describe("MessageInput microphone", () => {
     expect(input.value).toBe("draft text stays");
     expect(mockReceiveMessageFromUser).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test("an unexpected rejected start is caught, preserves the composer, and stays retryable", async () => {
+    const unhandled = jest.fn();
+    const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    window.addEventListener("unhandledrejection", unhandled);
+    mockStart
+      .mockRejectedValueOnce(new Error("unexpected internal start failure"))
+      .mockImplementationOnce(async () => {
+        mockActive = true;
+        return null;
+      });
+
+    try {
+      await renderComposer("draft text survives rejection");
+      await act(async () => {
+        Simulate.click(micButton());
+        await flush();
+      });
+
+      const input = container.querySelector("input[type='text']") as HTMLInputElement;
+      expect(input.value).toBe("draft text survives rejection");
+      expect(mockAlertError).toHaveBeenCalledTimes(1);
+      expect(mockAlertError).toHaveBeenCalledWith(
+        "Microphone",
+        expect.stringContaining("try again"),
+      );
+      expect(mockStop).toHaveBeenCalledTimes(1);
+      expect(micButton().disabled).toBe(false);
+      expect(micButton().dataset.processing).toBe("false");
+      expect(mockReceiveMessageFromUser).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      await act(async () => {
+        Simulate.click(micButton());
+        await flush();
+      });
+      expect(mockStart).toHaveBeenCalledTimes(2);
+      expect(micButton().textContent).toBe("24/PauseAlt");
+    } finally {
+      window.removeEventListener("unhandledrejection", unhandled);
+      consoleSpy.mockRestore();
+    }
+    expect(unhandled).not.toHaveBeenCalled();
   });
 
   test("successful capture toggles to listening; second click stops it", async () => {

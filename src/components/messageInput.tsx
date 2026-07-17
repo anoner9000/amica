@@ -3,7 +3,10 @@ ort.env.wasm.wasmPaths = "/_next/static/chunks/";
 
 import { useContext, useEffect, useRef, useState } from "react";
 import { IconButton } from "./iconButton";
-import { MicrophoneCapture } from "@/features/microphone/microphoneCapture";
+import {
+  MICROPHONE_GUIDANCE,
+  MicrophoneCapture,
+} from "@/features/microphone/microphoneCapture";
 import { useTranscriber } from "@/hooks/useTranscriber";
 import {
   cleanTranscript,
@@ -178,6 +181,15 @@ export default function MessageInput({
       } else if (failure) {
         alert.error("Microphone", failure.guidance);
       }
+    } catch (error) {
+      // The capture manager normally returns a classified failure. This
+      // boundary keeps an unexpected internal rejection actionable and
+      // retryable without allowing it to escape the click handler.
+      capture.stop();
+      setMicListening(false);
+      setMicSpeaking(false);
+      console.error("Unexpected microphone capture start failure.", error);
+      alert.error("Microphone", MICROPHONE_GUIDANCE.unknown_capture_failure);
     } finally {
       setMicStarting(false);
     }

@@ -196,7 +196,11 @@ export interface MicrophoneCaptureOptions extends MicrophoneCaptureCallbacks {
 
 interface ActiveSession {
   stream: MediaStream;
-  vad: { start: () => void; pause: () => void; destroy: () => void } | null;
+  vad: {
+    start: () => void | Promise<void>;
+    pause: () => void;
+    destroy: () => void;
+  } | null;
   onDeviceChange: (() => void) | null;
 }
 
@@ -204,7 +208,7 @@ const DEFAULT_PERMISSION_TIMEOUT_MS = 20_000;
 
 // Injection point for tests; production uses the real vad-web MicVAD.
 export type VadFactory = (options: Record<string, unknown>) => Promise<{
-  start: () => void;
+  start: () => void | Promise<void>;
   pause: () => void;
   destroy: () => void;
 }>;
@@ -289,8 +293,24 @@ export class MicrophoneCapture {
       }
 
       if (generation !== this.generation) {
-        stopTracks(stream);
-        try { vad?.destroy(); } catch {}
+        cleanupVadAndStream(vad, stream);
+        return null;
+      }
+
+      try {
+        await Promise.resolve(vad!.start());
+      } catch (error) {
+        cleanupVadAndStream(vad, stream);
+        const failure = buildMicrophoneFailure(error, environment);
+        this.reportFailure(failure, options, { notify: false });
+        return failure;
+      }
+
+      // stop() may have invalidated this attempt while an asynchronous VAD
+      // start was pending. Nothing is published until startup has succeeded
+      // and this generation is still current.
+      if (generation !== this.generation) {
+        cleanupVadAndStream(vad, stream);
         return null;
       }
 
@@ -300,7 +320,6 @@ export class MicrophoneCapture {
       } catch {}
 
       this.session = { stream, vad, onDeviceChange };
-      vad!.start();
       emitMicrophoneDiagnostic("capture_started", {
         origin: environment.origin,
         secureContext: environment.secureContext,
@@ -432,6 +451,15 @@ function stopTracks(stream: MediaStream): void {
       try { track.stop(); } catch {}
     });
   } catch {}
+}
+
+function cleanupVadAndStream(
+  vad: ActiveSession["vad"],
+  stream: MediaStream,
+): void {
+  try { vad?.pause(); } catch {}
+  try { vad?.destroy(); } catch {}
+  stopTracks(stream);
 }
 
 function withTimeout(
