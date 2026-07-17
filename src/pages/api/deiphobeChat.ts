@@ -4,7 +4,7 @@ import { spawn } from "child_process";
 import { handleConfig } from "@/features/externalAPI/externalAPI";
 import { config } from "@/utils/config";
 import { Message } from "@/features/chat/messages";
-import { stripLeadingAmicaExpressionTag } from "@/features/chat/deiphobePrompt";
+import { stripLeadingAmicaExpressionTag } from "@/features/chat/deiphobeChat";
 
 function isTruthy(value: string): boolean {
   const normalized = value.trim().toLowerCase();
@@ -25,6 +25,43 @@ function getLastUserMessage(messages: Message[] | undefined): string {
   return "";
 }
 
+function hasBoolean(value: unknown): value is boolean {
+  return typeof value === "boolean";
+}
+
+function getSegmentControlRequest(body: Record<string, unknown>) {
+  const hasNewSegment = Object.prototype.hasOwnProperty.call(body, "new_segment");
+  const hasContinuePreviousSegment = Object.prototype.hasOwnProperty.call(
+    body,
+    "continue_previous_segment",
+  );
+  if (!hasNewSegment && !hasContinuePreviousSegment) {
+    return null;
+  }
+
+  if (!hasBoolean(body.new_segment) || !hasBoolean(body.continue_previous_segment)) {
+    throw new Error("Invalid conversation segment control");
+  }
+
+  if (body.new_segment && body.continue_previous_segment) {
+    throw new Error("Conversation segment controls conflict");
+  }
+
+  if (!body.new_segment && !body.continue_previous_segment) {
+    throw new Error("Conversation segment control is missing");
+  }
+
+  const text = typeof body.text === "string" ? stripLeadingAmicaExpressionTag(body.text).trim() : "";
+  if (text !== "") {
+    throw new Error("Conversation segment controls must not include ordinary text");
+  }
+
+  return {
+    new_segment: body.new_segment,
+    continue_previous_segment: body.continue_previous_segment,
+  };
+}
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse,
@@ -38,18 +75,29 @@ export default async function handler(
   }
 
   const body = req.body ?? {};
-  const hasText = typeof body.text === "string";
-  const rawText = hasText ? body.text : getLastUserMessage(body.messages);
-  const text = stripLeadingAmicaExpressionTag(rawText).trim();
-  const rawMessages: Message[] = Array.isArray(body.messages) ? (body.messages as Message[]) : [];
-  const amicaMessageCount = rawMessages.length;
-  const amicaIncomingChars = rawMessages.reduce(
-    (sum: number, m: Message) => sum + (typeof m.content === "string" ? m.content.length : 0),
-    0,
-  );
+  let segmentControl: ReturnType<typeof getSegmentControlRequest> | null = null;
+  let text = "";
+  let amicaMessageCount = 0;
+  let amicaIncomingChars = 0;
+  try {
+    segmentControl = getSegmentControlRequest(body);
+    const hasText = typeof body.text === "string";
+    const rawText = hasText ? body.text : getLastUserMessage(body.messages);
+    text = stripLeadingAmicaExpressionTag(rawText).trim();
+    const rawMessages: Message[] = Array.isArray(body.messages) ? (body.messages as Message[]) : [];
+    amicaMessageCount = rawMessages.length;
+    amicaIncomingChars = rawMessages.reduce(
+      (sum: number, m: Message) => sum + (typeof m.content === "string" ? m.content.length : 0),
+      0,
+    );
 
-  if (!text.trim()) {
-    res.status(400).json({ error: "Missing text" });
+    if (!segmentControl && !text.trim()) {
+      res.status(400).json({ error: "Missing text" });
+      return;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid request";
+    res.status(400).json({ error: message });
     return;
   }
 
@@ -80,16 +128,12 @@ export default async function handler(
   }
 
   console.debug("[Amica Deiphobe] starting", {
-    repoRoot,
-    command,
-    userId,
-    sessionId,
-    namespace,
     privateMode: isTruthy(privateMode),
     privateMemoryRoot: privateMemoryRoot ? "[configured]" : "[not configured]",
     chatNumPredict: chatNumPredict ?? "[unset]",
     timeoutSeconds,
-    text,
+    textChars: text.length,
+    messageCount: amicaMessageCount,
   });
 
   const env: NodeJS.ProcessEnv = {
@@ -110,95 +154,85 @@ export default async function handler(
     env.LLM_NUM_PREDICT = chatNumPredict;
   }
 
-  const child = spawn(command, ["chat", "--text", text], {
-    cwd: repoRoot,
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-
-  let stdout = "";
-  let stderr = "";
-  let started = false;
   const timeoutMs = Number.isFinite(timeoutSeconds) && timeoutSeconds > 0
     ? timeoutSeconds * 1000
     : 120000;
+
+  const chatArgs = segmentControl
+    ? ["chat", segmentControl.new_segment ? "--new-segment" : "--continue-previous-segment"]
+    : ["chat", "--text", text, "--json"];
   const timeout = setTimeout(() => {
     console.warn("[Amica Deiphobe] timeout reached, killing child process");
-    child.kill("SIGKILL");
+    child?.kill("SIGKILL");
   }, timeoutMs);
 
-  const startResponse = () => {
-    if (started) {
-      return;
-    }
-    started = true;
-    res.status(200);
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.setHeader("Cache-Control", "no-cache, no-transform");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.setHeader("Connection", "keep-alive");
-    res.flushHeaders?.();
-  };
-
-  child.once("spawn", () => {
-    console.debug("[Amica Deiphobe] child spawned");
-    startResponse();
-  });
-
-  child.stdout.on("data", (chunk: Buffer) => {
-    const textChunk = chunk.toString("utf-8");
-    stdout += textChunk;
-    startResponse();
-    res.write(textChunk);
-  });
-
-  child.stderr.on("data", (chunk: Buffer) => {
-    const textChunk = chunk.toString("utf-8");
-    stderr += textChunk;
-    console.error("[Amica Deiphobe] stderr", textChunk.trimEnd());
-  });
-
-  child.on("error", (error) => {
-    clearTimeout(timeout);
-    console.error("[Amica Deiphobe] spawn error", error);
-    if (!started && !res.headersSent) {
-      res.status(500);
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    }
-    if (!res.writableEnded) {
-      res.status(500);
-      res.end(`Deiphobe execution failed: ${(error as Error).message}`);
-    }
-  });
-
-  child.on("close", (code, signal) => {
-    clearTimeout(timeout);
-
-    if (code === 0) {
-      if (!res.writableEnded) {
-        res.end();
-      }
-      return;
-    }
-
-    const message =
-      stderr.trim() ||
-      stdout.trim() ||
-      `Deiphobe exited with code ${code ?? "unknown"}${signal ? ` signal ${signal}` : ""}`;
-
-    console.error("[Amica Deiphobe] failed", {
-      code,
-      signal,
-      message,
+  let child: ReturnType<typeof spawn> | null = null;
+  try {
+    child = spawn(command, chatArgs, {
+      cwd: repoRoot,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
     });
 
-    if (!started && !res.headersSent) {
-      res.status(500);
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    }
+    let stdout = "";
+    let stderr = "";
 
-    if (!res.writableEnded) {
-      res.end(message);
+    child.once("spawn", () => {
+      console.debug("[Amica Deiphobe] child spawned");
+    });
+
+    child.stdout!.on("data", (chunk: Buffer) => {
+      const textChunk = chunk.toString("utf-8");
+      stdout += textChunk;
+    });
+
+    child.stderr!.on("data", (chunk: Buffer) => {
+      const textChunk = chunk.toString("utf-8");
+      stderr += textChunk;
+    });
+
+    child.on("close", (code, signal) => {
+      clearTimeout(timeout);
+      if (code === 0) {
+        try {
+          if (segmentControl) {
+            res.status(200).json({ text: stdout.trim() });
+            return;
+          }
+          const payload = JSON.parse(stdout.trim());
+          res.status(200).json(payload);
+        } catch {
+          res.status(502).json({ error: "Invalid Deiphobe response" });
+        }
+        return;
+      }
+
+      console.error("[Amica Deiphobe] failed", {
+        code,
+        signal,
+        stderrChars: stderr.length,
+        stdoutChars: stdout.length,
+      });
+
+      if (!res.headersSent) {
+        res.status(500);
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+      }
+
+      if (!res.writableEnded) {
+        res.end(JSON.stringify({ error: "Deiphobe execution failed" }));
+      }
+    });
+  } catch (error) {
+    clearTimeout(timeout);
+    console.error("[Amica Deiphobe] spawn error", error);
+    if (!res.headersSent) {
+      res.status(500);
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
     }
-  });
+    if (!res.writableEnded) {
+      res.status(500);
+      res.end(JSON.stringify({ error: "Deiphobe execution failed" }));
+    }
+  }
 }

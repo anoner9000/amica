@@ -2,14 +2,14 @@ import { beforeEach, describe, expect, jest, test } from "@jest/globals";
 import { EventEmitter } from "node:events";
 
 const mockConfigValues: Record<string, string> = {
-  deiphobe_repo_root: "/home/kyler/ClawDawg",
+  deiphobe_repo_root: "/opt/clawdawg",
   deiphobe_command: "./ops/scripts/bus/deiphobe",
   deiphobe_timeout_seconds: "5",
-  deiphobe_user_id: "uther-voice",
-  deiphobe_session_id: "voice-avatar-test",
+  deiphobe_user_id: "test-voice",
+  deiphobe_session_id: "test-conversation",
   deiphobe_namespace: "voice",
   deiphobe_private_mode: "true",
-  deiphobe_private_memory_root: "/home/kyler/.clawdawg-private/deiphobe_memory",
+  deiphobe_private_memory_root: "/tmp/clawdawg-private/deiphobe_memory",
 };
 
 const mockSpawn = jest.fn();
@@ -28,6 +28,27 @@ jest.mock("../src/utils/config", () => ({
 }));
 
 function createMockChildProcess(stdout = "", stderr = "", code = 0) {
+  const child = new EventEmitter() as any;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = jest.fn();
+  mockSpawn.mockReturnValue(child);
+
+  process.nextTick(() => {
+    child.emit("spawn");
+    if (stdout) {
+      child.stdout.emit("data", Buffer.from(JSON.stringify({ text: stdout })));
+    }
+    if (stderr) {
+      child.stderr.emit("data", Buffer.from(stderr));
+    }
+    child.emit("close", code);
+  });
+
+  return child;
+}
+
+function createMockChildProcessRaw(stdout = "", stderr = "", code = 0) {
   const child = new EventEmitter() as any;
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
@@ -108,19 +129,18 @@ describe("deiphobeChat handler", () => {
       await flushEvents();
 
       expect(res.statusCode).toBe(200);
-      expect(res.body).toBe("I didn't catch enough there.\n");
-      expect(res.body).not.toContain("refer to you as Uther");
+      expect(res.body).toEqual({ text: "I didn't catch enough there.\n" });
       expect(mockSpawn).toHaveBeenCalledWith(
         "./ops/scripts/bus/deiphobe",
-        ["chat", "--text", text],
+        ["chat", "--text", text, "--json"],
         expect.objectContaining({
-          cwd: "/home/kyler/ClawDawg",
+          cwd: "/opt/clawdawg",
           env: expect.objectContaining({
-            DEIPHOBE_CHAT_USER_ID: "uther-voice",
-            DEIPHOBE_CHAT_SESSION_ID: "voice-avatar-test",
+            DEIPHOBE_CHAT_USER_ID: "test-voice",
+            DEIPHOBE_CHAT_SESSION_ID: "test-conversation",
             DEIPHOBE_CHAT_NAMESPACE: "voice",
             DEIPHOBE_PRIVATE_MODE: "1",
-            DEIPHOBE_PRIVATE_MEMORY_ROOT: "/home/kyler/.clawdawg-private/deiphobe_memory",
+            DEIPHOBE_PRIVATE_MEMORY_ROOT: "/tmp/clawdawg-private/deiphobe_memory",
           }),
           stdio: ["ignore", "pipe", "pipe"],
         }),
@@ -144,10 +164,10 @@ describe("deiphobeChat handler", () => {
     await flushEvents();
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toBe("I didn't catch enough there.\n");
+    expect(res.body).toEqual({ text: "I didn't catch enough there.\n" });
     expect(mockSpawn).toHaveBeenCalledWith(
       "./ops/scripts/bus/deiphobe",
-      ["chat", "--text", expectedText],
+      ["chat", "--text", expectedText, "--json"],
       expect.any(Object),
     );
   });
@@ -162,8 +182,83 @@ describe("deiphobeChat handler", () => {
     await flushEvents();
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toBe("Deiphobe. That's me.\n");
-    expect(res.body).not.toContain("call me Uther");
+    expect(res.body).toEqual({ text: "Deiphobe. That's me.\n" });
+  });
+
+  test("routes new-segment control through typed flags without ordinary text", async () => {
+    createMockChildProcessRaw("I started a fresh conversation.\n");
+    const apiModule = await import("../src/pages/api/deiphobeChat");
+    const req = {
+      method: "POST",
+      body: {
+        text: null,
+        new_segment: true,
+        continue_previous_segment: false,
+      },
+    } as any;
+    const res = createResponse();
+
+    await apiModule.default(req, res as any);
+    await flushEvents();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ text: "I started a fresh conversation." });
+    expect(mockSpawn).toHaveBeenCalledWith(
+      "./ops/scripts/bus/deiphobe",
+      ["chat", "--new-segment"],
+      expect.objectContaining({
+        cwd: "/opt/clawdawg",
+        env: expect.objectContaining({
+          DEIPHOBE_CHAT_USER_ID: "test-voice",
+          DEIPHOBE_CHAT_SESSION_ID: "test-conversation",
+          DEIPHOBE_CHAT_NAMESPACE: "voice",
+          DEIPHOBE_PRIVATE_MODE: "1",
+        }),
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    );
+  });
+
+  test("routes continue-previous control through typed flags without ordinary text", async () => {
+    createMockChildProcessRaw("I continued the previous conversation.\n");
+    const apiModule = await import("../src/pages/api/deiphobeChat");
+    const req = {
+      method: "POST",
+      body: {
+        text: null,
+        new_segment: false,
+        continue_previous_segment: true,
+      },
+    } as any;
+    const res = createResponse();
+
+    await apiModule.default(req, res as any);
+    await flushEvents();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ text: "I continued the previous conversation." });
+    expect(mockSpawn).toHaveBeenCalledWith(
+      "./ops/scripts/bus/deiphobe",
+      ["chat", "--continue-previous-segment"],
+      expect.any(Object),
+    );
+  });
+
+  test.each([
+    [{ new_segment: true, continue_previous_segment: true }, "Conversation segment controls conflict"],
+    [{ new_segment: false, continue_previous_segment: false }, "Conversation segment control is missing"],
+    [{ new_segment: "true", continue_previous_segment: false }, "Invalid conversation segment control"],
+    [{ new_segment: true, continue_previous_segment: false, text: "hello" }, "Conversation segment controls must not include ordinary text"],
+  ])("rejects malformed conversation control requests", async (body, expectedError) => {
+    const apiModule = await import("../src/pages/api/deiphobeChat");
+    const req = { method: "POST", body } as any;
+    const res = createResponse();
+
+    await apiModule.default(req, res as any);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: expectedError });
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   test.each(["", "   ", "[neutral]   "])("rejects blank text without spawning Deiphobe: %j", async (text) => {

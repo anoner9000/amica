@@ -1,22 +1,30 @@
-import * as ort from "onnxruntime-web"
-ort.env.wasm.wasmPaths = '/_next/static/chunks/'
+import * as ort from "onnxruntime-web";
+ort.env.wasm.wasmPaths = "/_next/static/chunks/";
 
 import { useContext, useEffect, useRef, useState } from "react";
-import { useMicVAD } from "@ricky0123/vad-react"
+import { useMicVAD } from "@ricky0123/vad-react";
 import { IconButton } from "./iconButton";
 import { useTranscriber } from "@/hooks/useTranscriber";
-import { cleanTranscript, cleanFromPunctuation, cleanFromWakeWord } from "@/utils/stringProcessing";
+import {
+  cleanTranscript,
+  cleanFromPunctuation,
+  cleanFromWakeWord,
+} from "@/utils/stringProcessing";
 import { hasOnScreenKeyboard } from "@/utils/hasOnScreenKeyboard";
 import { AlertContext } from "@/features/alert/alertContext";
 import { ChatContext } from "@/features/chat/chatContext";
-import { openaiWhisper  } from "@/features/openaiWhisper/openaiWhisper";
-import { whispercpp  } from "@/features/whispercpp/whispercpp";
+import { openaiWhisper } from "@/features/openaiWhisper/openaiWhisper";
+import { whispercpp } from "@/features/whispercpp/whispercpp";
 import { config } from "@/utils/config";
-import { localChatLatency } from "@/features/chat/localChatLatency";
 import { WaveFile } from "wavefile";
 import { AmicaLifeContext } from "@/features/amicaLife/amicaLifeContext";
 import { AudioControlsContext } from "@/features/moshi/components/audioControlsContext";
-
+import {
+  sendDeiphobeConversationSegmentControl,
+} from "@/features/chat/deiphobeChat";
+// next.config.js emits these VAD assets into the Next static chunk directory.
+const VAD_WORKLET_URL = "/_next/static/chunks/vad.worklet.bundle.min.js";
+const VAD_MODEL_URL = "/_next/static/chunks/silero_vad.onnx";
 
 export default function MessageInput({
   userMessage,
@@ -33,24 +41,30 @@ export default function MessageInput({
 }) {
   const transcriber = useTranscriber();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [whisperOpenAIOutput, setWhisperOpenAIOutput] = useState<any | null>(null);
+  const [whisperOpenAIOutput, setWhisperOpenAIOutput] = useState<any | null>(
+    null,
+  );
   const [whisperCppOutput, setWhisperCppOutput] = useState<any | null>(null);
   const { chat: bot } = useContext(ChatContext);
   const { alert } = useContext(AlertContext);
   const { amicaLife } = useContext(AmicaLifeContext);
   const { audioControls: moshi } = useContext(AudioControlsContext);
-  const [ moshiMuted, setMoshiMuted] = useState(moshi.isMuted());
+  const [moshiMuted, setMoshiMuted] = useState(moshi.isMuted());
+  const [segmentControlStatus, setSegmentControlStatus] = useState("");
+  const [segmentControlBusy, setSegmentControlBusy] = useState(false);
 
   const vad = useMicVAD({
     startOnLoad: false,
+    workletURL: VAD_WORKLET_URL,
+    modelURL: VAD_MODEL_URL,
     onSpeechStart: () => {
-      console.debug('vad', 'on_speech_start');
-      console.time('performance_speech');
+      console.debug("vad", "on_speech_start");
+      console.time("performance_speech");
     },
     onSpeechEnd: (audio: Float32Array) => {
-      console.debug('vad', 'on_speech_end');
-      console.timeEnd('performance_speech');
-      console.time('performance_transcribe');
+      console.debug("vad", "on_speech_end");
+      console.timeEnd("performance_speech");
+      console.time("performance_transcribe");
       (window as any).chatvrm_latency_tracker = {
         start: +Date.now(),
         active: true,
@@ -58,8 +72,8 @@ export default function MessageInput({
 
       try {
         switch (config("stt_backend")) {
-          case 'whisper_browser': {
-            console.debug('whisper_browser attempt');
+          case "whisper_browser": {
+            console.debug("whisper_browser attempt");
             // since VAD sample rate is same as whisper we do nothing here
             // both are 16000
             const audioCtx = new AudioContext();
@@ -68,11 +82,13 @@ export default function MessageInput({
             transcriber.start(buffer);
             break;
           }
-          case 'whisper_openai': {
-            console.debug('whisper_openai attempt');
+          case "whisper_openai": {
+            console.debug("whisper_openai attempt");
             const wav = new WaveFile();
-            wav.fromScratch(1, 16000, '32f', audio);
-            const file = new File([wav.toBuffer()], "input.wav", { type: "audio/wav" });
+            wav.fromScratch(1, 16000, "32f", audio);
+            const file = new File([wav.toBuffer()], "input.wav", {
+              type: "audio/wav",
+            });
 
             let prompt;
             // TODO load prompt if it exists
@@ -82,18 +98,20 @@ export default function MessageInput({
                 const transcript = await openaiWhisper(file, prompt);
                 setWhisperOpenAIOutput(transcript);
               } catch (e: any) {
-                console.error('whisper_openai error', e);
-                alert.error('whisper_openai error', e.toString());
+                console.error("whisper_openai error", e);
+                alert.error("whisper_openai error", e.toString());
               }
             })();
             break;
           }
-          case 'whispercpp': {
-            console.debug('whispercpp attempt');
+          case "whispercpp": {
+            console.debug("whispercpp attempt");
             const wav = new WaveFile();
-            wav.fromScratch(1, 16000, '32f', audio);
-            wav.toBitDepth('16');
-            const file = new File([wav.toBuffer()], "input.wav", { type: "audio/wav" });
+            wav.fromScratch(1, 16000, "32f", audio);
+            wav.toBitDepth("16");
+            const file = new File([wav.toBuffer()], "input.wav", {
+              type: "audio/wav",
+            });
 
             let prompt;
             // TODO load prompt if it exists
@@ -103,29 +121,36 @@ export default function MessageInput({
                 const transcript = await whispercpp(file, prompt);
                 setWhisperCppOutput(transcript);
               } catch (e: any) {
-                console.error('whispercpp error', e);
-                alert.error('whispercpp error', e.toString());
+                console.error("whispercpp error", e);
+                alert.error("whispercpp error", e.toString());
               }
             })();
             break;
           }
         }
       } catch (e: any) {
-        console.error('stt_backend error', e);
-        alert.error('STT backend error', e.toString());
+        console.error("stt_backend error", e);
+        alert.error("STT backend error", e.toString());
       }
     },
   });
 
   if (vad.errored) {
-    console.error('vad error', vad.errored);
+    console.error("vad error", vad.errored);
   }
 
   function handleTranscriptionResult(preprocessed: string) {
     const cleanText = cleanTranscript(preprocessed);
-    const wakeWordEnabled = config("wake_word_enabled") === 'true';
-    const textStartsWithWakeWord = wakeWordEnabled && cleanFromPunctuation(cleanText).startsWith(cleanFromPunctuation(config("wake_word")));
-    const text = wakeWordEnabled && textStartsWithWakeWord ? cleanFromWakeWord(cleanText, config("wake_word")) : cleanText;
+    const wakeWordEnabled = config("wake_word_enabled") === "true";
+    const textStartsWithWakeWord =
+      wakeWordEnabled &&
+      cleanFromPunctuation(cleanText).startsWith(
+        cleanFromPunctuation(config("wake_word")),
+      );
+    const text =
+      wakeWordEnabled && textStartsWithWakeWord
+        ? cleanFromWakeWord(cleanText, config("wake_word"))
+        : cleanText;
 
     if (wakeWordEnabled) {
       // Text start with wake word
@@ -135,9 +160,13 @@ export default function MessageInput({
           amicaLife.pause();
         }
         bot.updateAwake();
-      // Case text doesn't start with wake word and not receive trigger message in amica life
+        // Case text doesn't start with wake word and not receive trigger message in amica life
       } else {
-        if (config("amica_life_enabled") === "true" && amicaLife.triggerMessage !== true && !bot.isAwake()) {
+        if (
+          config("amica_life_enabled") === "true" &&
+          amicaLife.triggerMessage !== true &&
+          !bot.isAwake()
+        ) {
           bot.updateAwake();
         }
       }
@@ -149,25 +178,25 @@ export default function MessageInput({
       }
     }
 
-
     if (text === "") {
       return;
     }
 
-
-    if (config("autosend_from_mic") === 'true') {
+    if (config("autosend_from_mic") === "true") {
       if (!wakeWordEnabled || bot.isAwake()) {
-        bot.receiveMessageFromUser(text,false);
-      } 
+        bot.receiveMessageFromUser(text, false);
+      }
     } else {
       setUserMessage(text);
     }
-    console.timeEnd('performance_transcribe');
+    console.timeEnd("performance_transcribe");
   }
 
-  function handleInputChange(event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) {
-    onChangeUserMessage(event); 
-  
+  function handleInputChange(
+    event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+  ) {
+    onChangeUserMessage(event);
+
     // Pause amicaLife and update bot's awake status when typing
     if (config("amica_life_enabled") === "true") {
       amicaLife.pause();
@@ -177,7 +206,7 @@ export default function MessageInput({
 
   // for whisper_browser
   useEffect(() => {
-    if (transcriber.output && ! transcriber.isBusy) {
+    if (transcriber.output && !transcriber.isBusy) {
       const output = transcriber.output?.text;
       handleTranscriptionResult(output);
     }
@@ -205,42 +234,67 @@ export default function MessageInput({
       return;
     }
 
-    localChatLatency.recordSubmit();
-    bot.receiveMessageFromUser(message,false);
+    bot.receiveMessageFromUser(message, false);
     // only if we are using non-VAD mode should we focus on the input
-    if (! vad.listening) {
-      if (! hasOnScreenKeyboard()) {
+    if (!vad.listening) {
+      if (!hasOnScreenKeyboard()) {
         inputRef.current?.focus();
       }
     }
     setUserMessage("");
   }
 
+  async function runConversationControl(
+    control: { new_segment: boolean; continue_previous_segment: boolean },
+    statusText: string,
+  ) {
+    if (isChatProcessing || segmentControlBusy) {
+      return;
+    }
+
+    setSegmentControlBusy(true);
+    try {
+      bot.updateAwake();
+      const reply = await sendDeiphobeConversationSegmentControl(control);
+      setSegmentControlStatus(reply || statusText);
+    } catch (error: any) {
+      const message = error instanceof Error ? error.message : statusText;
+      setSegmentControlStatus(message);
+      alert.error("Conversation control failed", message);
+    } finally {
+      setSegmentControlBusy(false);
+    }
+  }
+
   return (
     <div className="fixed bottom-2 z-20 w-full">
-      <div className="mx-auto max-w-4xl p-2 backdrop-blur-lg border-0 rounded-lg">
+      <div className="mx-auto max-w-4xl rounded-lg border-0 p-2 backdrop-blur-lg">
         <div className="grid grid-flow-col grid-cols-[min-content_1fr_min-content] gap-[8px]">
           <div>
-            <div className='flex flex-col justify-center items-center'>
+            <div className="flex flex-col items-center justify-center">
               {config("chatbot_backend") === "moshi" ? (
                 <IconButton
-                iconName={!moshiMuted ? "24/PauseAlt" : "24/Microphone"}
-                className="bg-secondary hover:bg-secondary-hover active:bg-secondary-press disabled:bg-secondary-disabled"
-                isProcessing={moshiMuted && moshi.getRecorder() != null}
-                disabled={!moshi.getRecorder()}
-                onClick={() => {
-                  moshi.toggleMute();
-                  setMoshiMuted(!moshiMuted);
-                }}
-              />
+                  iconName={!moshiMuted ? "24/PauseAlt" : "24/Microphone"}
+                  className="bg-secondary hover:bg-secondary-hover active:bg-secondary-press disabled:bg-secondary-disabled"
+                  isProcessing={moshiMuted && moshi.getRecorder() != null}
+                  disabled={!moshi.getRecorder()}
+                  onClick={() => {
+                    moshi.toggleMute();
+                    setMoshiMuted(!moshiMuted);
+                  }}
+                />
               ) : (
                 <IconButton
-                iconName={vad.listening ? "24/PauseAlt" : "24/Microphone"}
-                className="bg-secondary hover:bg-secondary-hover active:bg-secondary-press disabled:bg-secondary-disabled"
-                isProcessing={vad.userSpeaking}
-                disabled={config('stt_backend') === 'none' || vad.loading || Boolean(vad.errored)}
-                onClick={vad.toggle}
-              />
+                  iconName={vad.listening ? "24/PauseAlt" : "24/Microphone"}
+                  className="bg-secondary hover:bg-secondary-hover active:bg-secondary-press disabled:bg-secondary-disabled"
+                  isProcessing={vad.userSpeaking}
+                  disabled={
+                    config("stt_backend") === "none" ||
+                    vad.loading ||
+                    Boolean(vad.errored)
+                  }
+                  onClick={vad.toggle}
+                />
               )}
             </div>
           </div>
@@ -248,7 +302,11 @@ export default function MessageInput({
           <input
             type="text"
             ref={inputRef}
-            placeholder={config("chatbot_backend") === "moshi" ? "Disabled in moshi chatbot" : "Write message here..."}
+            placeholder={
+              config("chatbot_backend") === "moshi"
+                ? "Disabled in moshi chatbot"
+                : "Write message here..."
+            }
             onChange={handleInputChange}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -256,7 +314,7 @@ export default function MessageInput({
                   inputRef.current?.blur();
                 }
 
-                if (userMessage.trim() === "") {
+                if (userMessage === "") {
                   return false;
                 }
 
@@ -264,21 +322,59 @@ export default function MessageInput({
               }
             }}
             disabled={config("chatbot_backend") === "moshi"}
-
             className="disabled block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-1 focus:ring-inset focus:ring-gray-400 sm:text-sm sm:leading-6"
             value={userMessage}
             autoComplete="off"
           />
 
-          <div className='flex flex-col justify-center items-center'>
+          <div className="flex flex-col items-center justify-center">
             <IconButton
               iconName="24/Send"
               className="ml-2 bg-secondary hover:bg-secondary-hover active:bg-secondary-press disabled:bg-secondary-disabled"
-              isProcessing={isChatProcessing || transcriber.isBusy}
-              disabled={isChatProcessing || !userMessage.trim() || transcriber.isModelLoading || config("chatbot_backend") === "moshi"}
+              isProcessing={isChatProcessing || segmentControlBusy || transcriber.isBusy}
+              disabled={
+                isChatProcessing ||
+                segmentControlBusy ||
+                !userMessage.trim() ||
+                transcriber.isModelLoading ||
+                config("chatbot_backend") === "moshi"
+              }
               onClick={clickedSendButton}
             />
           </div>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2 px-1 text-xs">
+          <button
+            type="button"
+            className="rounded-md border border-white/20 bg-secondary px-3 py-2 font-semibold text-white shadow-sm transition hover:bg-secondary-hover active:bg-secondary-press disabled:bg-secondary-disabled disabled:opacity-60"
+            disabled={isChatProcessing || segmentControlBusy}
+            onClick={() => {
+              void runConversationControl(
+                { new_segment: true, continue_previous_segment: false },
+                "I started a fresh conversation.",
+              );
+            }}
+          >
+            New Conversation
+          </button>
+          <button
+            type="button"
+            className="rounded-md border border-white/20 bg-secondary px-3 py-2 font-semibold text-white shadow-sm transition hover:bg-secondary-hover active:bg-secondary-press disabled:bg-secondary-disabled disabled:opacity-60"
+            disabled={isChatProcessing || segmentControlBusy}
+            onClick={() => {
+              void runConversationControl(
+                { new_segment: false, continue_previous_segment: true },
+                "I continued the previous conversation.",
+              );
+            }}
+          >
+            Continue Previous
+          </button>
+          {segmentControlStatus !== "" && (
+            <div className="min-h-5 flex-1 text-right text-white/80" aria-live="polite">
+              {segmentControlStatus}
+            </div>
+          )}
         </div>
       </div>
     </div>
