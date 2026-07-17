@@ -18,6 +18,11 @@ let fetchCalls: FetchCall[];
 let serverRevision: string;
 let getResponder: () => Promise<any>;
 let postStatus: number;
+let postResponder: (body: Record<string, string>) => Promise<any>;
+let revisionCounter: number;
+let inFlightPosts: number;
+let maxInFlightPosts: number;
+let serverValues: Record<string, string>;
 
 function posts(): FetchCall[] {
   return fetchCalls.filter((c) => c.method === "POST");
@@ -31,39 +36,53 @@ function makeGetResponse() {
     ok: true,
     status: 200,
     headers: { get: (h: string) => (h === "x-config-revision" ? serverRevision : null) },
-    json: async () => ({ name: "Deiphobe", tts_backend: "piper" }),
+    json: async () => ({ ...serverValues }),
   };
 }
 
-function makePostResponse() {
+function makePostResponse(body: Record<string, string>) {
   if (postStatus === 200) {
-    serverRevision = `rev-${Math.random().toString(16).slice(2, 10)}`;
+    revisionCounter += 1;
+    serverRevision = `rev-${revisionCounter}`;
+    serverValues[body.key] = body.value;
   }
   return {
     ok: postStatus === 200,
     status: postStatus,
     headers: { get: (h: string) => (h === "x-config-revision" ? serverRevision : null) },
-    json: async () => ({}),
+    json: async () => postStatus === 200 ? { revision: serverRevision } : { error: "save rejected" },
   };
 }
 
 function installFetchMock() {
   fetchCalls = [];
   serverRevision = "rev-initial";
+  revisionCounter = 0;
   postStatus = 200;
+  inFlightPosts = 0;
+  maxInFlightPosts = 0;
+  serverValues = { name: "Deiphobe", tts_backend: "piper" };
   getResponder = async () => makeGetResponse();
+  postResponder = async (body) => makePostResponse(body);
   (global as any).fetch = jest.fn(async (url: any, init?: any) => {
     const method = init?.method ?? "GET";
+    const body = init?.body ? JSON.parse(init.body) : undefined;
     fetchCalls.push({
       method,
       url: String(url),
       revision: init?.headers?.["x-config-revision"],
-      body: init?.body ? JSON.parse(init.body) : undefined,
+      body,
     });
     if (method === "GET") {
       return getResponder();
     }
-    return makePostResponse();
+    inFlightPosts += 1;
+    maxInFlightPosts = Math.max(maxInFlightPosts, inFlightPosts);
+    try {
+      return await postResponder(body);
+    } finally {
+      inFlightPosts -= 1;
+    }
   });
 }
 
@@ -214,17 +233,211 @@ describe("deliberate writes", () => {
     expect(posts()[0].revision).toBe("rev-initial");
   });
 
+  test("a save waits for an in-flight hydration read before taking its revision", async () => {
+    let releaseGet!: (response: any) => void;
+    getResponder = () => new Promise((resolve) => { releaseGet = resolve; });
+    const mod = hydrateFreshClient();
+    await flush();
+    const save = mod.updateConfig("name", "After hydration");
+    await flush();
+    expect(posts()).toHaveLength(0);
+    releaseGet(makeGetResponse());
+    await save;
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0].revision).toBe("rev-initial");
+  });
+
   test("a stale tab's save is rejected by revision conflict and never retried with client data", async () => {
     const mod = hydrateFreshClient();
     await flush();
     postStatus = 409;
     serverRevision = "rev-someone-else";
-    await mod.updateConfig("name", "StaleValue");
+    await expect(mod.updateConfig("name", "StaleValue")).rejects.toMatchObject({
+      name: "ConfigConflictError",
+      status: 409,
+    });
     expect(posts()).toHaveLength(1);
-    // The client adopted the server's revision but did not re-send its data.
-    const { serverConfigRevision } = require("../src/features/externalAPI/externalAPI");
-    void serverConfigRevision;
+  });
+
+  test("two simultaneous saves produce sequential requests with one in flight", async () => {
+    const mod = hydrateFreshClient();
+    await flush();
+    await Promise.all([
+      mod.updateConfig("name", "First"),
+      mod.updateConfig("tts_backend", "second"),
+    ]);
+    expect(posts().map((call) => call.body)).toEqual([
+      { key: "name", value: "First" },
+      { key: "tts_backend", value: "second" },
+    ]);
+    expect(maxInFlightPosts).toBe(1);
+  });
+
+  test("three simultaneous saves carry three successive revisions in FIFO order", async () => {
+    const mod = hydrateFreshClient();
+    await flush();
+    await Promise.all([
+      mod.updateConfig("first", "1"),
+      mod.updateConfig("second", "2"),
+      mod.updateConfig("third", "3"),
+    ]);
+    expect(posts().map((call) => call.body.key)).toEqual(["first", "second", "third"]);
+    expect(posts().map((call) => call.revision)).toEqual([
+      "rev-initial",
+      "rev-1",
+      "rev-2",
+    ]);
+  });
+
+  test("each caller promise resolves only after its own request completes", async () => {
+    const mod = hydrateFreshClient();
+    await flush();
+    const releases: Array<() => void> = [];
+    postResponder = (body) => new Promise((resolve) => {
+      releases.push(() => resolve(makePostResponse(body)));
+    });
+    const completed: string[] = [];
+    const first = mod.updateConfig("first", "1").then(() => completed.push("first"));
+    const second = mod.updateConfig("second", "2").then(() => completed.push("second"));
+    await flush();
     expect(posts()).toHaveLength(1);
+    expect(completed).toEqual([]);
+    releases[0]();
+    await flush();
+    expect(completed).toEqual(["first"]);
+    expect(posts()).toHaveLength(2);
+    releases[1]();
+    await Promise.all([first, second]);
+    expect(completed).toEqual(["first", "second"]);
+  });
+
+  test("share import persists every intended key", async () => {
+    const mod = hydrateFreshClient();
+    await flush();
+    const mutations = Array.from({ length: 13 }, (_, index) => ({
+      key: `share_import_${index}`,
+      value: `value-${index}`,
+    }));
+    await mod.updateConfigs(mutations);
+    expect(posts().map((call) => call.body)).toEqual(mutations);
+    expect(mutations.every(({ key, value }) => serverValues[key] === value)).toBe(true);
+  });
+
+  test("VRM save persists all three intended keys", async () => {
+    const mod = hydrateFreshClient();
+    await flush();
+    const mutations = [
+      { key: "vrm_url", value: "blob:vrm" },
+      { key: "vrm_hash", value: "hash" },
+      { key: "vrm_save_type", value: "local" },
+    ];
+    await mod.updateConfigs(mutations);
+    expect(posts().map((call) => call.body)).toEqual(mutations);
+  });
+
+  test("share page save persists both intended keys", async () => {
+    const mod = hydrateFreshClient();
+    await flush();
+    const mutations = [
+      { key: "vrm_url", value: "https://example.test/avatar.vrm" },
+      { key: "vrm_save_type", value: "web" },
+    ];
+    await mod.updateConfigs(mutations);
+    expect(posts().map((call) => call.body)).toEqual(mutations);
+  });
+
+  test("rapid volume changes preserve the final deliberate value", async () => {
+    const mod = hydrateFreshClient();
+    await flush();
+    await Promise.all(["0.1", "0.4", "0.8", "1"].map((value) =>
+      mod.updateConfig("tts_volume", value)));
+    expect(posts().map((call) => call.body.value)).toEqual(["0.1", "0.4", "0.8", "1"]);
+    expect(serverValues.tts_volume).toBe("1");
+    expect(localStorage.getItem("chatvrm_tts_volume")).toBe("1");
+  });
+
+  test("a failed mutation rejects and is not reported as success", async () => {
+    const mod = hydrateFreshClient();
+    await flush();
+    postStatus = 500;
+    let succeeded = false;
+    await expect(mod.updateConfig("name", "failed").then(() => {
+      succeeded = true;
+    })).rejects.toMatchObject({ status: 500 });
+    expect(succeeded).toBe(false);
+    expect(localStorage.getItem("chatvrm_name")).toBeNull();
+  });
+
+  test("external conflict rejects later queued writes without retrying or dropping them", async () => {
+    const mod = hydrateFreshClient();
+    await flush();
+    postStatus = 409;
+    serverRevision = "external-revision";
+    const first = mod.updateConfig("first", "1");
+    const second = mod.updateConfig("second", "2");
+    const third = mod.updateConfig("third", "3");
+    await expect(first).rejects.toMatchObject({ name: "ConfigConflictError" });
+    await expect(second).rejects.toMatchObject({
+      name: "ConfigQueueInvalidatedError",
+      conflict: true,
+    });
+    await expect(third).rejects.toMatchObject({
+      name: "ConfigQueueInvalidatedError",
+      conflict: true,
+    });
+    expect(posts()).toHaveLength(1);
+    expect(serverValues.first).toBeUndefined();
+    expect(serverValues.second).toBeUndefined();
+    expect(serverValues.third).toBeUndefined();
+  });
+
+  test("network failure does not advance the revision", async () => {
+    const mod = hydrateFreshClient();
+    await flush();
+    postResponder = async () => { throw new TypeError("network down"); };
+    await expect(mod.updateConfig("name", "offline")).rejects.toMatchObject({ status: null });
+    expect(mod.authoritativeConfigRevision()).toBe("rev-initial");
+  });
+
+  test("server persistence failure does not advance the revision", async () => {
+    const mod = hydrateFreshClient();
+    await flush();
+    postStatus = 500;
+    await expect(mod.updateConfig("name", "not-persisted")).rejects.toMatchObject({ status: 500 });
+    expect(mod.authoritativeConfigRevision()).toBe("rev-initial");
+    expect(serverValues.name).toBe("Deiphobe");
+  });
+
+  test("known fire-and-forget callers attach a rejection observer", async () => {
+    const mod = hydrateFreshClient();
+    await flush();
+    postStatus = 500;
+    const unhandled: unknown[] = [];
+    const listener = (event: PromiseRejectionEvent) => unhandled.push(event.reason);
+    window.addEventListener("unhandledrejection", listener);
+    mod.updateConfig("name", "fire-and-forget");
+    await flush();
+    window.removeEventListener("unhandledrejection", listener);
+    expect(unhandled).toEqual([]);
+  });
+
+  test("client cache, local state, and server fixture agree after a multi-key burst", async () => {
+    const mod = hydrateFreshClient();
+    await flush();
+    const mutations = [
+      { key: "name", value: "Dei" },
+      { key: "vrm_url", value: "https://example.test/dei.vrm" },
+      { key: "vrm_save_type", value: "web" },
+      { key: "tts_volume", value: "0.9" },
+    ];
+    await mod.updateConfigs(mutations);
+    const clientValues = mod.authoritativeConfigSnapshot();
+    for (const { key, value } of mutations) {
+      expect(serverValues[key]).toBe(value);
+      expect(clientValues[key]).toBe(value);
+      expect(localStorage.getItem(`chatvrm_${key}`)).toBe(value);
+    }
+    expect(maxInFlightPosts).toBe(1);
   });
 });
 

@@ -185,8 +185,12 @@ describe("server config authority", () => {
   test("a failed atomic replacement leaves the previous file byte-identical", () => {
     const { dataHandler } = loadModules();
     const before = sha256(configPath);
-    const renameSpy = jest.spyOn(fs, "renameSync").mockImplementation(() => {
-      throw new Error("simulated rename failure");
+    const originalRename = fs.renameSync.bind(fs);
+    const renameSpy = jest.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+      if (to === configPath) {
+        throw new Error("simulated target rename failure");
+      }
+      return originalRename(from, to);
     });
     const req: any = {
       method: "POST",
@@ -217,5 +221,211 @@ describe("server config authority", () => {
     expect(res.statusCode).toBe(200);
     const bak = fs.readFileSync(`${configPath}.bak`);
     expect(bak.equals(originalBytes)).toBe(true);
+  });
+
+  test("fsyncs the temporary file before target rename and the directory after", () => {
+    const { dataHandler } = loadModules();
+    const events: string[] = [];
+    const fdKinds = new Map<number, string>();
+    const originalOpen = fs.openSync.bind(fs);
+    const originalFsync = fs.fsyncSync.bind(fs);
+    const originalRename = fs.renameSync.bind(fs);
+    const originalClose = fs.closeSync.bind(fs);
+
+    jest.spyOn(fs, "openSync").mockImplementation(((p: fs.PathLike, flags: any, mode?: any) => {
+      const fd = originalOpen(p, flags, mode);
+      const name = String(p);
+      fdKinds.set(fd, name === storageDir ? "directory" : name.includes(".bak.tmp-") ? "backup" : name.includes(".tmp-") ? "temporary" : "other");
+      return fd;
+    }) as any);
+    jest.spyOn(fs, "fsyncSync").mockImplementation((fd) => {
+      events.push(`fsync:${fdKinds.get(fd)}`);
+      return originalFsync(fd);
+    });
+    jest.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+      if (to === configPath) events.push("rename:target");
+      return originalRename(from, to);
+    });
+    jest.spyOn(fs, "closeSync").mockImplementation((fd) => {
+      if (fdKinds.get(fd) === "directory") events.push("close:directory");
+      return originalClose(fd);
+    });
+
+    const res = postConfig(dataHandler, { key: "name", value: "Durable" }, sha256(configPath));
+    expect(res.statusCode).toBe(200);
+    expect(events).toEqual([
+      "fsync:temporary",
+      "fsync:backup",
+      "rename:target",
+      "fsync:directory",
+      "close:directory",
+    ]);
+  });
+
+  test("closes the directory handle after directory fsync failure", () => {
+    const { dataHandler } = loadModules();
+    let directoryFd: number | null = null;
+    const originalOpen = fs.openSync.bind(fs);
+    const originalFsync = fs.fsyncSync.bind(fs);
+    const originalClose = fs.closeSync.bind(fs);
+    const closeCalls: number[] = [];
+
+    jest.spyOn(fs, "openSync").mockImplementation(((p: fs.PathLike, flags: any, mode?: any) => {
+      const fd = originalOpen(p, flags, mode);
+      if (String(p) === storageDir) directoryFd = fd;
+      return fd;
+    }) as any);
+    jest.spyOn(fs, "fsyncSync").mockImplementation((fd) => {
+      if (fd === directoryFd) throw new Error("simulated directory fsync failure");
+      return originalFsync(fd);
+    });
+    jest.spyOn(fs, "closeSync").mockImplementation((fd) => {
+      closeCalls.push(fd);
+      return originalClose(fd);
+    });
+
+    const res = postConfig(dataHandler, { key: "name", value: "Maybe durable" }, sha256(configPath));
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toMatchObject({
+      code: "CONFIG_DURABILITY_UNCONFIRMED",
+      phase: "directory-fsync",
+      targetReplaced: true,
+    });
+    expect(directoryFd).not.toBeNull();
+    expect(closeCalls).toContain(directoryFd!);
+  });
+
+  test("directory-open failure is a hard post-rename persistence error", () => {
+    const { dataHandler } = loadModules();
+    const originalOpen = fs.openSync.bind(fs);
+    jest.spyOn(fs, "openSync").mockImplementation(((p: fs.PathLike, flags: any, mode?: any) => {
+      if (String(p) === storageDir) throw new Error("simulated directory open failure");
+      return originalOpen(p, flags, mode);
+    }) as any);
+
+    const res = postConfig(dataHandler, { key: "name", value: "Maybe durable" }, sha256(configPath));
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toMatchObject({
+      code: "CONFIG_DURABILITY_UNCONFIRMED",
+      phase: "directory-open",
+      targetReplaced: true,
+    });
+  });
+
+  test("directory-close failure is a hard persistence error", () => {
+    const { dataHandler } = loadModules();
+    let directoryFd: number | null = null;
+    let failedOnce = false;
+    const originalOpen = fs.openSync.bind(fs);
+    const originalClose = fs.closeSync.bind(fs);
+    jest.spyOn(fs, "openSync").mockImplementation(((p: fs.PathLike, flags: any, mode?: any) => {
+      const fd = originalOpen(p, flags, mode);
+      if (String(p) === storageDir) directoryFd = fd;
+      return fd;
+    }) as any);
+    jest.spyOn(fs, "closeSync").mockImplementation((fd) => {
+      if (fd === directoryFd && !failedOnce) {
+        failedOnce = true;
+        throw new Error("simulated directory close failure");
+      }
+      return originalClose(fd);
+    });
+
+    const res = postConfig(dataHandler, { key: "name", value: "Maybe durable" }, sha256(configPath));
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toMatchObject({ phase: "directory-close", targetReplaced: true });
+    expect(failedOnce).toBe(true);
+  });
+
+  test("validation failure performs no target rename or directory synchronization", () => {
+    const { dataHandler } = loadModules();
+    const renameSpy = jest.spyOn(fs, "renameSync");
+    const openSpy = jest.spyOn(fs, "openSync");
+    const fsyncSpy = jest.spyOn(fs, "fsyncSync");
+    const before = sha256(configPath);
+    const res = postConfig(dataHandler, { name: "not a mutation" }, before);
+    expect(res.statusCode).toBe(400);
+    expect(renameSpy).not.toHaveBeenCalled();
+    expect(openSpy).not.toHaveBeenCalledWith(storageDir, expect.anything());
+    expect(fsyncSpy).not.toHaveBeenCalled();
+    expect(sha256(configPath)).toBe(before);
+  });
+
+  test.each([
+    "temporary creation",
+    "temporary write",
+    "temporary fsync",
+    "temporary close",
+    "backup handling",
+  ])("a %s failure leaves the original target byte-identical", (failurePoint) => {
+    const { dataHandler } = loadModules();
+    const original = fs.readFileSync(configPath);
+    const originalOpen = fs.openSync.bind(fs);
+    const originalWrite = fs.writeSync.bind(fs);
+    const originalFsync = fs.fsyncSync.bind(fs);
+    const originalClose = fs.closeSync.bind(fs);
+    let temporaryFd: number | null = null;
+    let failedClose = false;
+
+    jest.spyOn(fs, "openSync").mockImplementation(((p: fs.PathLike, flags: any, mode?: any) => {
+      if (failurePoint === "temporary creation" && String(p).includes("config.json.tmp-")) {
+        throw new Error("simulated temporary creation failure");
+      }
+      const fd = originalOpen(p, flags, mode);
+      if (String(p).includes("config.json.tmp-")) temporaryFd = fd;
+      return fd;
+    }) as any);
+    jest.spyOn(fs, "writeSync").mockImplementation(((fd: number, ...args: any[]) => {
+      if (failurePoint === "temporary write" && fd === temporaryFd) {
+        throw new Error("simulated temporary write failure");
+      }
+      return (originalWrite as any)(fd, ...args);
+    }) as any);
+    jest.spyOn(fs, "fsyncSync").mockImplementation((fd) => {
+      if (failurePoint === "temporary fsync" && fd === temporaryFd) {
+        throw new Error("simulated temporary fsync failure");
+      }
+      return originalFsync(fd);
+    });
+    jest.spyOn(fs, "closeSync").mockImplementation((fd) => {
+      if (failurePoint === "temporary close" && fd === temporaryFd && !failedClose) {
+        failedClose = true;
+        throw new Error("simulated temporary close failure");
+      }
+      return originalClose(fd);
+    });
+    if (failurePoint === "backup handling") {
+      jest.spyOn(fs, "copyFileSync").mockImplementation(() => {
+        throw new Error("simulated backup failure");
+      });
+    }
+
+    const res = postConfig(dataHandler, { key: "name", value: "Never authoritative" }, sha256(configPath));
+    expect(res.statusCode).toBe(500);
+    expect(fs.readFileSync(configPath).equals(original)).toBe(true);
+    expect(fs.readdirSync(storageDir).filter((name) => name.includes(".tmp-"))).toEqual([]);
+  });
+
+  test("post-rename durability errors log no configuration secret", () => {
+    const { dataHandler } = loadModules();
+    const secret = "super-secret-config-value";
+    let directoryFd: number | null = null;
+    const originalOpen = fs.openSync.bind(fs);
+    const originalFsync = fs.fsyncSync.bind(fs);
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    jest.spyOn(fs, "openSync").mockImplementation(((p: fs.PathLike, flags: any, mode?: any) => {
+      const fd = originalOpen(p, flags, mode);
+      if (String(p) === storageDir) directoryFd = fd;
+      return fd;
+    }) as any);
+    jest.spyOn(fs, "fsyncSync").mockImplementation((fd) => {
+      if (fd === directoryFd) throw new Error("simulated directory fsync failure");
+      return originalFsync(fd);
+    });
+
+    const res = postConfig(dataHandler, { key: "name", value: secret }, sha256(configPath));
+    expect(res.statusCode).toBe(500);
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(secret);
+    expect(JSON.stringify(res.body)).not.toContain(secret);
   });
 });

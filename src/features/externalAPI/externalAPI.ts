@@ -37,60 +37,85 @@ export let serverConfig: Record<string, string> = {};
 // it on every config GET/POST; a config write is only accepted when it carries
 // the revision the client last read. Never invented client-side.
 export let serverConfigRevision: string | null = null;
+let configFetchPromise: Promise<any> | null = null;
 
 export const CONFIG_REVISION_HEADER = "x-config-revision";
 
-function captureRevision(response: any) {
-  const revision = response?.headers?.get?.(CONFIG_REVISION_HEADER);
-  if (revision) {
-    serverConfigRevision = revision;
+export class ConfigRequestError extends Error {
+  readonly status: number | null;
+  readonly code: string | null;
+
+  constructor(message: string, status: number | null, code: string | null = null) {
+    super(message);
+    this.name = "ConfigRequestError";
+    this.status = status;
+    this.code = code;
   }
 }
 
-export async function fetcher(method: string, url: URL, data?: any) {
+export class ConfigConflictError extends ConfigRequestError {
+  constructor(message = "Server configuration changed elsewhere; save rejected.") {
+    super(message, 409, "CONFIG_REVISION_CONFLICT");
+    this.name = "ConfigConflictError";
+  }
+}
+
+function responseRevision(response: any): string | null {
+  const revision = response?.headers?.get?.(CONFIG_REVISION_HEADER);
+  return typeof revision === "string" && revision.length > 0 ? revision : null;
+}
+
+async function responseError(response: any, fallback: string): Promise<string> {
+  try {
+    const body = await response.json();
+    return typeof body?.error === "string" && body.error.length > 0
+      ? body.error
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function fetcher(
+  method: "GET" | "POST",
+  url: URL,
+  data?: Record<string, string>,
+  revision?: string,
+) {
   let response: any;
-  switch (method) {
-    case "POST":
-      try {
-        response = await fetch(url, {
-          method: method,
+  try {
+    response = await fetch(url, method === "POST"
+      ? {
+          method,
           headers: {
             "Content-Type": "application/json",
-            ...(serverConfigRevision
-              ? { [CONFIG_REVISION_HEADER]: serverConfigRevision }
-              : {}),
+            ...(revision ? { [CONFIG_REVISION_HEADER]: revision } : {}),
           },
           body: JSON.stringify(data),
-        });
-        if (response.ok || response.status === 409) {
-          // On success the server issues the new revision; on conflict it
-          // reports the current one so the next deliberate save can proceed.
-          // A conflicted write is never retried with the client's data.
-          captureRevision(response);
         }
-        if (response.status === 409) {
-          console.warn("Server config changed elsewhere; save rejected.");
-        }
-      } catch (error) {
-        console.error("Failed to POST server config: ", error);
-      }
-      break;
-
-    case "GET":
-      try {
-        response = await fetch(url);
-        if (response.ok) {
-          serverConfig = await response.json();
-          captureRevision(response);
-        }
-      } catch (error) {
-        console.error("Failed to fetch server config:", error);
-      }
-      break;
-
-    default:
-      break;
+      : undefined);
+  } catch (error) {
+    throw new ConfigRequestError(
+      method === "POST"
+        ? "Could not reach the configuration server; the save was not confirmed."
+        : "Could not load server configuration.",
+      null,
+    );
   }
+
+  if (!response.ok) {
+    if (response.status === 409) {
+      throw new ConfigConflictError(await responseError(
+        response,
+        "Server configuration changed elsewhere; save rejected.",
+      ));
+    }
+    throw new ConfigRequestError(
+      await responseError(response, `${method} configuration request failed.`),
+      response.status,
+    );
+  }
+
   return response;
 }
 
@@ -107,16 +132,65 @@ export async function handleConfig(
       // Read-only: populate the server config cache. Hydration, remounts,
       // reloads, and reconnects may only ever take this path. The server
       // file is authoritative; client defaults are not.
-      return fetcher("GET", configUrl);
+      {
+        if (configFetchPromise === null) {
+          configFetchPromise = (async () => {
+            const response = await fetcher("GET", configUrl);
+            const revision = responseRevision(response);
+            if (!revision) {
+              throw new ConfigRequestError(
+                "Configuration response did not include a revision.",
+                response.status ?? 200,
+              );
+            }
+            serverConfig = await response.json();
+            serverConfigRevision = revision;
+            return response;
+          })();
+        }
+        const currentFetch = configFetchPromise;
+        try {
+          return await currentFetch;
+        } finally {
+          if (configFetchPromise === currentFetch) {
+            configFetchPromise = null;
+          }
+        }
+      }
 
     case "update":
       // Deliberate single-key mutation from an explicit user action.
       // A write must carry the revision the client read, so read first if
       // this client has never fetched the server config.
       if (serverConfigRevision === null) {
-        await fetcher("GET", configUrl);
+        await handleConfig("fetch");
       }
-      return fetcher("POST", configUrl, data);
+      if (!data || typeof data.key !== "string" || typeof data.value !== "string") {
+        throw new ConfigRequestError("Invalid configuration mutation.", null);
+      }
+      {
+        // Read the revision at execution time. The serialized caller queue
+        // guarantees this request completes and advances it before the next
+        // mutation can reach this point.
+        const submittedRevision = serverConfigRevision;
+        if (!submittedRevision) {
+          throw new ConfigRequestError(
+            "No authoritative configuration revision is available.",
+            null,
+          );
+        }
+        const response = await fetcher("POST", configUrl, data, submittedRevision);
+        const returnedRevision = responseRevision(response);
+        if (!returnedRevision) {
+          throw new ConfigRequestError(
+            "Configuration save succeeded without a returned revision.",
+            response.status ?? 200,
+          );
+        }
+        serverConfig = { ...serverConfig, [data.key]: data.value };
+        serverConfigRevision = returnedRevision;
+        return response;
+      }
 
     default:
       return;

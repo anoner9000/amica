@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { writeFile } from '@/features/externalAPI/utils/apiHelper';
+import { AtomicPersistenceError, writeFile } from '@/features/externalAPI/utils/apiHelper';
 import { chatLogsFilePath, configRevision, ConfigConflictError, ConfigValidationError, handleGetChatLogs, handleGetConfig, handleGetLogs, handleGetSubconscious, handleGetUserInputMessages, handlePostChatLogs, handlePostConfig, handlePostLogs, handlePostSubconscious, handlePostUserInputMessages, logsFilePath, subconsciousFilePath, userInputMessagesFilePath } from '@/features/externalAPI/dataHelper';
 
 export const CONFIG_REVISION_HEADER = 'x-config-revision';
@@ -28,7 +28,17 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
         return res.status(405).end(`Method ${req.method} Not Allowed`);
     }
   } catch (error) {
-    return res.status(500).json({ error: error });
+    if (error instanceof AtomicPersistenceError) {
+      return res.status(500).json({
+        error: error.message,
+        code: error.targetReplaced
+          ? 'CONFIG_DURABILITY_UNCONFIRMED'
+          : 'CONFIG_PERSISTENCE_FAILED',
+        phase: error.phase,
+        targetReplaced: error.targetReplaced,
+      });
+    }
+    return res.status(500).json({ error: 'Internal server error.' });
   }
 }
 

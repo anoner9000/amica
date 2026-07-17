@@ -4,7 +4,7 @@ import { vrmList } from "@/paths";
 import { thumbPrefix } from "@/components/settings/common";
 import { AddItemCallbackType, VrmStoreActionType, vrmStoreReducer } from "./vrmStoreReducer";
 import { Viewer } from "../vrmViewer/viewer";
-import { config, updateConfig } from "@/utils/config";
+import { config, updateConfigs } from "@/utils/config";
 
 interface VrmStoreContextType {
     getCurrentVrm: () => VrmData | undefined;
@@ -34,16 +34,21 @@ export const VrmStoreProvider = ({ children }: PropsWithChildren<{}>): JSX.Eleme
               // TODO handle loading progress
             })
               .then(() => {return new Promise(resolve => setTimeout(resolve, 300));})
-              .then(() => {
-                updateConfig("vrm_url", callbackProp.url);
-                updateConfig("vrm_hash", callbackProp.hash);
-                updateConfig("vrm_save_type", "local");
+              .then(async () => {
+                await updateConfigs([
+                  { key: "vrm_url", value: callbackProp.url },
+                  { key: "vrm_hash", value: callbackProp.hash },
+                  { key: "vrm_save_type", value: "local" },
+                ]);
                 viewer.getScreenshotBlob((thumbBlob: Blob | null) => {
                   if (!thumbBlob) return;
                   vrmListDispatch({ type: VrmStoreActionType.updateVrmThumb, url: callbackProp.url, thumbBlob, vrmList: callbackProp.vrmList, callback: (updatedThumbVrmList: VrmData[]) => {
                     vrmListDispatch({ type: VrmStoreActionType.setVrmList, vrmList: updatedThumbVrmList });
                   }});
                 });
+              })
+              .catch(() => {
+                // updateConfig already reports the actionable save failure.
               });
         }});
     };
